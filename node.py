@@ -48,37 +48,6 @@ class BlockchainDB:
             """)
             conn.commit()
 
-    def persist_block(self, block, tx_list):
-        """Saves a verified block and its dependent transactions to disk."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute("""
-                    INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (block.index, block.timestamp, block.merkle_root[0] if isinstance(block.merkle_root, list) else block.merkle_root, block.previous_hash, block.nonce, block.hash))
-                
-                for tx in tx_list:
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO transactions (tx_id, block_index, sender_pub_key, signature)
-                        VALUES (?, ?, ?, ?)
-                    """, (tx.tx_id, block.index, tx.sender_pub_key, tx.signature))
-                conn.commit()
-            except sqlite3.Error as e:
-                print(f"[-] Database Write Error: {e}")
-
-    def sync_utxo_pool_to_disk(self, utxo_pool: dict):
-        """Flushes the current active in-memory UTXO state to database storage."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM utxo_pool")  # Clear stale state tracking
-            for key, utxo in utxo_pool.items():
-                cursor.execute("""
-                    INSERT INTO utxo_pool (utxo_key, tx_id, output_index, recipient, amount)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (key, utxo.tx_id, utxo.output_index, utxo.recipient, utxo.amount))
-            conn.commit()
-
     def load_chain_state(self) -> tuple:
         """Restores chain records and active UTXOs into memory upon reboot."""
         with sqlite3.connect(self.db_path) as conn:
@@ -175,6 +144,7 @@ class KiwiBlockchain:
         self.chain = []
         self.utxo_pool = {}
         self.difficulty = 2
+        self.db_filename = db_filename
 
         saved_chain, saved_utxo = self.db.load_chain_state()
         if saved_chain:
@@ -187,16 +157,29 @@ class KiwiBlockchain:
 
     def create_genesis_block(self):
         genesis_block = Block(0, [], "0")
-        genesis_block.hash = genesis_block.compute_block_hash() if hasattr(genesis_block, 'compute_block_hash') else genesis_block.compute_hash()
+        genesis_block.hash = genesis_block.compute_hash()
         self.chain.append(genesis_block)
-        self.db.persist_block(genesis_block, [])
-        self.db.sync_utxo_pool_to_disk(self.utxo_pool)
+        
+        # Fresh boot writes structural tracking elements clean
+        with sqlite3.connect(self.db_filename) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM utxo_pool")
+            cursor.execute("DELETE FROM transactions")
+            cursor.execute("DELETE FROM blocks")
+            cursor.execute("""
+                INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (genesis_block.index, genesis_block.timestamp, "empty", genesis_block.previous_hash, genesis_block.nonce, genesis_block.hash))
+            conn.commit()
 
     def add_block_to_chain(self, block: Block) -> bool:
         if block.previous_hash != self.chain[-1].hash:
             return False
 
-        # 1. Update balance states inside RAM space
+        # Create localized backup structures to enable memory state rollback if disk writes fail
+        backup_utxo_pool = self.utxo_pool.copy()
+        
+        # 1. Apply structural transformations inside RAM space
         for tx in block.transactions:
             for tx_in in tx.inputs:
                 utxo_key = f"{tx_in['tx_id']}:{tx_in['index']}"
@@ -207,15 +190,51 @@ class KiwiBlockchain:
 
         # --- 10 SECOND INJECTED SLEEP WINDOW ---
         print("\n[!] Memory state updated. 10-second window open. KILL TERM NOW TO SIMULATE CRASH!")
-        for remaining in range(10, 0, -1):
-            print(f"    Time remaining: {remaining} seconds...")
-            time.sleep(1)
-        print("[+] Window closed. Proceeding to disk commit.\n")
-        # ---------------------------------------
+        try:
+            for remaining in range(10, 0, -1):
+                print(f"    Time remaining: {remaining} seconds...")
+                time.sleep(1)
+            print("[+] Window closed. Proceeding to structural disk commit.\n")
+        except KeyboardInterrupt:
+            # Revert local memory tracking state to prevent polluted output frames before shutdown
+            self.utxo_pool = backup_utxo_pool
+            self.chain.pop()
+            print("\n[-] Critical execution interrupt caught. System shutting down cleanly...")
+            raise
 
-        # 2. Atomic commitment step to local disk storage
-        self.db.persist_block(block, block.transactions)
-        self.db.sync_utxo_pool_to_disk(self.utxo_pool)
+        # 2. Complete the database transaction atomically
+        try:
+            with sqlite3.connect(self.db_filename) as conn:
+                cursor = conn.cursor()
+                # Store block record
+                cursor.execute("""
+                    INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (block.index, block.timestamp, block.merkle_root[0] if isinstance(block.merkle_root, list) else block.merkle_root, block.previous_hash, block.nonce, block.hash))
+                
+                # Store structural dependent transactions
+                for tx in block.transactions:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO transactions (tx_id, block_index, sender_pub_key, signature)
+                        VALUES (?, ?, ?, ?)
+                    """, (tx.tx_id, block.index, tx.sender_pub_key, tx.signature))
+                
+                # Resynchronize disk-based UTXO references
+                cursor.execute("DELETE FROM utxo_pool")
+                for key, utxo in self.utxo_pool.items():
+                    cursor.execute("""
+                        INSERT INTO utxo_pool (utxo_key, tx_id, output_index, recipient, amount)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (key, utxo.tx_id, utxo.output_index, utxo.recipient, utxo.amount))
+                
+                conn.commit()
+        except sqlite3.Error as e:
+            # Fall back inside RAM if storage engine reports tracking failures
+            self.utxo_pool = backup_utxo_pool
+            self.chain.pop()
+            print(f"[-] Database Processing Error: {e}")
+            return False
+
         return True
 
 # --- Simulating Reboot Resilience ---
@@ -226,21 +245,27 @@ async def main():
     alice_pub = "alice_public_key"
     bob_pub = "bob_public_key"
 
-    genesis_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=alice_pub, amount=500.0)
-    blockchain_instance.utxo_pool["genesis_mint:0"] = genesis_coin
+    # Only fund Alice if this is a fresh setup
+    if len(blockchain_instance.chain) == 1 and not blockchain_instance.utxo_pool:
+        genesis_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=alice_pub, amount=500.0)
+        blockchain_instance.utxo_pool["genesis_mint:0"] = genesis_coin
 
-    tx_input = {"tx_id": "genesis_mint", "index": 0}
-    tx_output = UTXO(tx_id="tx_01", output_index=0, recipient=bob_pub, amount=150.0)
-    tx_change = UTXO(tx_id="tx_01", output_index=1, recipient=alice_pub, amount=350.0)
-    secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=alice_pub)
+    # Read Alice's current balance before processing the trade
+    alice_initial = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == alice_pub)
 
-    new_block = Block(index=1, transactions=[secure_tx], previous_hash=blockchain_instance.chain[-1].hash)
+    if alice_initial >= 500.0:
+        tx_input = {"tx_id": "genesis_mint", "index": 0}
+        tx_output = UTXO(tx_id="tx_01", output_index=0, recipient=bob_pub, amount=150.0)
+        tx_change = UTXO(tx_id="tx_01", output_index=1, recipient=alice_pub, amount=350.0)
+        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=alice_pub)
 
-    while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
-        new_block.nonce += 1
-        new_block.hash = new_block.compute_hash()
+        new_block = Block(index=len(blockchain_instance.chain), transactions=[secure_tx], previous_hash=blockchain_instance.chain[-1].hash)
 
-    blockchain_instance.add_block_to_chain(new_block)
+        while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
+            new_block.nonce += 1
+            new_block.hash = new_block.compute_hash()
+
+        blockchain_instance.add_block_to_chain(new_block)
 
     print(f"[✔] State committed. Total blocks: {len(blockchain_instance.chain)}")
     print(f"[✔] Alice Balance before shutdown: {sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == alice_pub)} KWT")
