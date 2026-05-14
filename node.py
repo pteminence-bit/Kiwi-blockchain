@@ -3,7 +3,7 @@ import hashlib
 import json
 import sqlite3
 import time
-
+import sys
 
 # --- Database Persistence Layer ---
 class BlockchainDB:
@@ -83,11 +83,9 @@ class BlockchainDB:
         """Restores chain records and active UTXOs into memory upon reboot."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
             # Reconstruct Blocks
             cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
             db_blocks = cursor.fetchall()
-            
             chain = []
             for row in db_blocks:
                 block = Block(index=row[0], transactions=[], previous_hash=row[3], nonce=row[4])
@@ -99,13 +97,10 @@ class BlockchainDB:
             # Reconstruct UTXO Pool
             cursor.execute("SELECT utxo_key, tx_id, output_index, recipient, amount FROM utxo_pool")
             db_utxos = cursor.fetchall()
-            
             utxo_pool = {}
             for row in db_utxos:
                 utxo_pool[row[0]] = UTXO(tx_id=row[1], output_index=row[2], recipient=row[3], amount=row[4])
-                
             return chain, utxo_pool
-
 
 # --- Cryptographic Helper Elements ---
 def generate_signature(private_key: str, message: str) -> str:
@@ -113,7 +108,6 @@ def generate_signature(private_key: str, message: str) -> str:
 
 def verify_signature(public_key: str, message: str, signature: str) -> bool:
     return hashlib.sha256((public_key + message).encode()).hexdigest() == signature
-
 
 # --- Core Logic with Database Anchors ---
 class UTXO:
@@ -155,7 +149,6 @@ class Transaction:
         output_total = sum(out.amount for out in self.outputs)
         return input_total >= output_total
 
-
 class Block:
     def __init__(self, index: int, transactions: list, previous_hash: str, nonce: int = 0):
         self.index = index
@@ -176,15 +169,13 @@ class Block:
         block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
         return hashlib.sha256(json.dumps(block_header, sort_keys=True).encode()).hexdigest()
 
-
 class KiwiBlockchain:
     def __init__(self, db_filename: str = "kiwi_ledger.db"):
         self.db = BlockchainDB(db_filename)
         self.chain = []
         self.utxo_pool = {}
         self.difficulty = 2
-        
-        # Load existing state if it exists, otherwise initialize genesis
+
         saved_chain, saved_utxo = self.db.load_chain_state()
         if saved_chain:
             self.chain = saved_chain
@@ -196,7 +187,7 @@ class KiwiBlockchain:
 
     def create_genesis_block(self):
         genesis_block = Block(0, [], "0")
-        genesis_block.hash = genesis_block.compute_hash()
+        genesis_block.hash = genesis_block.compute_block_hash() if hasattr(genesis_block, 'compute_block_hash') else genesis_block.compute_hash()
         self.chain.append(genesis_block)
         self.db.persist_block(genesis_block, [])
         self.db.sync_utxo_pool_to_disk(self.utxo_pool)
@@ -205,54 +196,55 @@ class KiwiBlockchain:
         if block.previous_hash != self.chain[-1].hash:
             return False
 
-        # Process transactions into UTXO memory space
+        # 1. Update balance states inside RAM space
         for tx in block.transactions:
             for tx_in in tx.inputs:
                 utxo_key = f"{tx_in['tx_id']}:{tx_in['index']}"
                 self.utxo_pool.pop(utxo_key, None)
             for out in tx.outputs:
                 self.utxo_pool[f"{tx.tx_id}:{out.output_index}"] = out
-
         self.chain.append(block)
-        
-        # Atomic commitment step to local disk storage
+
+        # --- 10 SECOND INJECTED SLEEP WINDOW ---
+        print("\n[!] Memory state updated. 10-second window open. KILL TERM NOW TO SIMULATE CRASH!")
+        for remaining in range(10, 0, -1):
+            print(f"    Time remaining: {remaining} seconds...")
+            time.sleep(1)
+        print("[+] Window closed. Proceeding to disk commit.\n")
+        # ---------------------------------------
+
+        # 2. Atomic commitment step to local disk storage
         self.db.persist_block(block, block.transactions)
         self.db.sync_utxo_pool_to_disk(self.utxo_pool)
         return True
-
 
 # --- Simulating Reboot Resilience ---
 async def main():
     print("--- FIRST BOOT: Initializing Ledger & Creating Data ---")
     blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
-    
+
     alice_pub = "alice_public_key"
     bob_pub = "bob_public_key"
 
-    # Distribute initial currency structure manually inside memory pool
     genesis_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=alice_pub, amount=500.0)
     blockchain_instance.utxo_pool["genesis_mint:0"] = genesis_coin
-    
-    # Process spend parameters
+
     tx_input = {"tx_id": "genesis_mint", "index": 0}
     tx_output = UTXO(tx_id="tx_01", output_index=0, recipient=bob_pub, amount=150.0)
     tx_change = UTXO(tx_id="tx_01", output_index=1, recipient=alice_pub, amount=350.0)
-    
     secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=alice_pub)
-    
-    # Pack data into a verified block structure
+
     new_block = Block(index=1, transactions=[secure_tx], previous_hash=blockchain_instance.chain[-1].hash)
-    
-    # Mine and commit to database
+
     while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
         new_block.nonce += 1
         new_block.hash = new_block.compute_hash()
-        
+
     blockchain_instance.add_block_to_chain(new_block)
+
     print(f"[✔] State committed. Total blocks: {len(blockchain_instance.chain)}")
     print(f"[✔] Alice Balance before shutdown: {sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == alice_pub)} KWT")
 
-    # Clear application space to simulate zeroed memory context
     del blockchain_instance
     print("\n--- CRASH / REBOOT DETECTED: Simulating Memory Loss ---\n")
     await asyncio.sleep(1)
@@ -260,11 +252,9 @@ async def main():
     print("--- SECOND BOOT: Instantiating New Object Reference ---")
     rebooted_blockchain = KiwiBlockchain("kiwi_live_node.db")
     print(f"[✔] Rebuilt blocks verified: {len(rebooted_blockchain.chain)}")
-    
-    # Re-verify UTXO states from local database file
+
     alice_recovered_bal = sum(u.amount for u in rebooted_blockchain.utxo_pool.values() if u.recipient == alice_pub)
     bob_recovered_bal = sum(u.amount for u in rebooted_blockchain.utxo_pool.values() if u.recipient == bob_pub)
-    
     print(f"[✔] Alice Recovered Balance: {alice_recovered_bal} KWT")
     print(f"[✔] Bob Recovered Balance: {bob_recovered_bal} KWT")
 
