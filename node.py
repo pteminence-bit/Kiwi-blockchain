@@ -9,6 +9,10 @@ from fastapi import FastAPI, HTTPException
 import uvicorn
 from pydantic import BaseModel
 
+# Native cryptographic primitives for Ed25519 asymmetric signatures
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.exceptions import InvalidSignature
+
 # --- Database Persistence Layer ---
 class BlockchainDB:
     def __init__(self, db_path: str = "kiwi_ledger.db"):
@@ -70,14 +74,21 @@ class BlockchainDB:
                 utxo_pool[row[0]] = UTXO(tx_id=row[1], output_index=row[2], recipient=row[3], amount=row[4])
             return chain, utxo_pool
 
-# --- Cryptographic Helper Elements ---
-def generate_signature(private_key: str, message: str) -> str:
-    """Simulates cryptographic signing by hashing the private key and message together."""
-    return hashlib.sha256((private_key + message).encode()).hexdigest()
-
-def verify_signature(public_key: str, message: str, signature: str) -> bool:
-    """Verifies that a message was signed by the private key matching the public key."""
-    return hashlib.sha256((public_key + message).encode()).hexdigest() == signature
+# --- Core Cryptographic Helper Functions ---
+def verify_ed25519_signature(public_key_hex: str, message: str, signature_hex: str) -> bool:
+    """Verifies a genuine Ed25519 asymmetric signature against a public key."""
+    try:
+        public_key_bytes = bytes.fromhex(public_key_hex)
+        signature_bytes = bytes.fromhex(signature_hex)
+        
+        # Load the raw public key into the cryptography object engine
+        public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
+        
+        # Verify the message bytes
+        public_key.verify(signature_bytes, message.encode())
+        return True
+    except (ValueError, InvalidSignature, TypeError):
+        return False
 
 # --- Core Logic with Database Anchors ---
 class UTXO:
@@ -102,13 +113,11 @@ class Transaction:
         tx_data = {"inputs": self.inputs, "outputs": [out.to_dict() for out in self.outputs], "sender": self.sender_pub_key}
         return hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
 
-    def sign_tx(self, private_key: str):
-        self.signature = generate_signature(private_key, self.tx_id)
-
     def is_valid(self, utxo_pool: dict) -> bool:
         if not self.inputs:
             return True
-        if not verify_signature(self.sender_pub_key, self.tx_id, self.signature):
+        msg_to_verify = f"{self.inputs}->{[out.to_dict() for out in self.outputs]}"
+        if not verify_ed25519_signature(self.sender_pub_key, msg_to_verify, self.signature):
             return False
         input_total = 0.0
         for tx_in in self.inputs:
@@ -133,7 +142,7 @@ class Block:
         tx_hashes = [tx.tx_id for tx in self.transactions]
         if not tx_hashes:
             return hashlib.sha256(b"empty").hexdigest()
-        return tx_hashes if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
+        return tx_hashes[0] if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
 
     def compute_hash(self) -> str:
         block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
@@ -225,11 +234,9 @@ class KiwiBlockchain:
 blockchain_instance = None
 mempool = []
 
-# --- Lifespan Manager for Async Initialization Safety ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global blockchain_instance
-    # Instantiate engine safely inside async context loop
     blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
     yield
 
@@ -237,13 +244,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Kiwi Blockchain Node Engine", lifespan=lifespan)
 
 class TransactionPayload(BaseModel):
-    sender: str
-    recipient: str
+    sender: str          # Must be a valid 64-character Ed25519 Public Key hex
+    recipient: str       # Must be a valid 64-character Ed25519 Public Key hex
     amount: float
-    signature: str
+    signature: str       # 128-character cryptographic signature hex
 
 class WalletSignPayload(BaseModel):
-    private_key: str
+    private_key: str     # 64-character Private Key hex string
     message: str
 
 @app.get("/chain")
@@ -270,32 +277,55 @@ def get_balance(address: str):
 def get_mempool():
     return {"mempool_size": len(mempool), "transactions": mempool}
 
+@app.post("/wallet/create")
+def create_wallet_keypair():
+    """Generates a secure asymmetric cryptographic keypair (Ed25519)."""
+    private_key = ed25519.Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    
+    private_hex = private_key.private_bytes_raw().hex()
+    public_hex = public_key.public_bytes_raw().hex()
+    
+    return {
+        "notice": "Save your private key securely. It cannot be recovered.",
+        "private_key": private_hex,
+        "public_key": public_hex
+    }
+
 @app.post("/wallet/sign")
 def sign_transaction_data(payload: WalletSignPayload):
-    """NATIVE FASTAPI ROUTE: Generates cryptographic wallet signature."""
-    sig = generate_signature(payload.private_key, payload.message)
-    return {"message_string": payload.message, "signature": sig}
+    """Signs data natively using an Ed25519 private key."""
+    try:
+        private_bytes = bytes.fromhex(payload.private_key)
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_bytes)
+        
+        signature = private_key.sign(payload.message.encode())
+        return {"message_string": payload.message, "signature": signature.hex()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Signing error: {str(e)}")
 
 @app.post("/transactions/new")
 def add_transaction(payload: TransactionPayload):
-    # Bootstrap fallback funding loop
-    if not blockchain_instance.utxo_pool and payload.sender == "alice_public_key":
+    # 1. Bootstrap layer funding the sender address automatically if pool is empty
+    if not blockchain_instance.utxo_pool:
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
-    # Reconstruct the explicit deterministic payload string
+    # 2. Re-create the deterministic message string that was signed
     msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount}"
     
-    if not verify_signature(payload.sender, msg_to_verify, payload.signature):
+    # 3. Perform real Ed25519 cryptographic validation check
+    if not verify_ed25519_signature(payload.sender, msg_to_verify, payload.signature):
         raise HTTPException(status_code=401, detail="Cryptographic signature verification failed! Access Denied.")
 
+    # 4. Check available funds
     current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == payload.sender)
     if current_bal < payload.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance.")
 
     mempool.append(payload.dict())
     return {
-        "message": "Signature verified! Transaction safely pooled.",
+        "message": "Asymmetric signature verified! Transaction pooled.",
         "pending_transactions_count": len(mempool)
     }
 
@@ -345,7 +375,7 @@ def mine_block_from_mempool():
 
     mempool = []
     return {
-        "message": "Mempool cleared! Block signed and mined successfully.",
+        "message": "Block mined and secured via Asymmetric Cryptography!",
         "block_index": new_block.index,
         "block_hash": new_block.hash
     }
