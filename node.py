@@ -130,7 +130,7 @@ class Block:
         tx_hashes = [tx.tx_id for tx in self.transactions]
         if not tx_hashes:
             return hashlib.sha256(b"empty").hexdigest()
-        return tx_hashes
+        return tx_hashes[0] if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
 
     def compute_hash(self) -> str:
         block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
@@ -203,7 +203,7 @@ class KiwiBlockchain:
                 cursor.execute("""
                     INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (block.index, block.timestamp, "tx_data", block.previous_hash, block.nonce, block.hash))
+                """, (block.index, block.timestamp, block.merkle_root, block.previous_hash, block.nonce, block.hash))
                 
                 cursor.execute("DELETE FROM utxo_pool")
                 for key, utxo in self.utxo_pool.items():
@@ -221,6 +221,9 @@ class KiwiBlockchain:
 # --- API Specification Layer ---
 app = FastAPI(title="Kiwi Blockchain Node Engine")
 blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
+
+# Temporary in-memory queue for pending transactions
+mempool = []
 
 class TransactionPayload(BaseModel):
     sender: str
@@ -249,54 +252,84 @@ def get_balance(address: str):
     bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == address)
     return {"address": address, "balance": bal}
 
-@app.post("/mine")
-def mine_block(payload: TransactionPayload):
-    """Processes an on-demand transaction, mines a block, and updates state."""
-    # 1. Distribute initial tokens to the sender if pool is completely dry
-    if not blockchain_instance.utxo_pool:
+@app.get("/mempool")
+def get_mempool():
+    """Returns the transactions waiting in line to be mined."""
+    return {"mempool_size": len(mempool), "transactions": mempool}
+
+@app.post("/transactions/new")
+def add_transaction(payload: TransactionPayload):
+    """Cues a transaction into the mempool instead of mining it immediately."""
+    # 1. Distribute initial tokens to the sender if pool is completely dry (Bootstrap layer)
+    if not blockchain_instance.utxo_pool and payload.sender == "alice_public_key":
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
-        
-    # 2. Map standard UTXO tracking context inputs
+
     current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == payload.sender)
     if current_bal < payload.amount:
-        raise HTTPException(status_code=400, detail="Insufficient sender balance tokens.")
+        raise HTTPException(status_code=400, detail="Insufficient balance.")
 
-    # Find an active key to consume
-    source_tx_id = "genesis_mint"
-    source_index = 0
-    for key, utxo in blockchain_instance.utxo_pool.items():
-        if utxo.recipient == payload.sender:
-            source_tx_id = utxo.tx_id
-            source_index = utxo.output_index
-            break
+    # 2. Add to mempool queue
+    mempool.append(payload.dict())
+    return {
+        "message": "Transaction added to mempool successfully!",
+        "pending_transactions_count": len(mempool)
+    }
 
-    tx_input = {"tx_id": source_tx_id, "index": source_index}
-    tx_output = UTXO(tx_id="tx_api", output_index=0, recipient=payload.recipient, amount=payload.amount)
-    change_amount = current_bal - payload.amount
-    tx_change = UTXO(tx_id="tx_api", output_index=1, recipient=payload.sender, amount=change_amount)
-    
-    secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=payload.sender)
-    
-    # 3. Assemble and Mine Block
+@app.post("/mine")
+def mine_block_from_mempool():
+    """Mines all transactions currently waiting inside the mempool queue."""
+    global mempool
+    if not mempool:
+        raise HTTPException(status_code=400, detail="Mempool is empty. Nothing to mine.")
+
+    block_transactions = []
+
+    # Process each transaction sequentially from the queue
+    for tx_data in mempool:
+        sender = tx_data["sender"]
+        recipient = tx_data["recipient"]
+        amount = tx_data["amount"]
+
+        # Locate valid UTXO to consume
+        source_tx_id = "genesis_mint"
+        source_index = 0
+        for key, utxo in blockchain_instance.utxo_pool.items():
+            if utxo.recipient == sender:
+                source_tx_id = utxo.tx_id
+                source_index = utxo.output_index
+                break
+
+        current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == sender)
+        
+        tx_input = {"tx_id": source_tx_id, "index": source_index}
+        tx_output = UTXO(tx_id=f"tx_{int(time.time())}", output_index=0, recipient=recipient, amount=amount)
+        tx_change = UTXO(tx_id=f"tx_{int(time.time())}", output_index=1, recipient=sender, amount=current_bal - amount)
+
+        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=sender)
+        block_transactions.append(secure_tx)
+
+    # Build and mine the aggregate block structure
     new_block = Block(
-        index=len(blockchain_instance.chain), 
-        transactions=[secure_tx], 
+        index=len(blockchain_instance.chain),
+        transactions=block_transactions,
         previous_hash=blockchain_instance.chain[-1].hash
     )
-    
+
     while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
         new_block.nonce += 1
         new_block.hash = new_block.compute_hash()
-        
-    # 4. Commit to SQLite State
+
     success = blockchain_instance.add_block_to_chain(new_block)
     if not success:
-        raise HTTPException(status_code=500, detail="State insertion failure. Ledger rejected block link.")
-        
+        raise HTTPException(status_code=500, detail="Database commitment failure.")
+
+    # Clear the mempool queue upon successful mining confirmation
+    mempool = []
+
     return {
-        "message": "Block mined and saved successfully!", 
-        "block_index": new_block.index, 
+        "message": "Mempool cleared! Block mined successfully.",
+        "block_index": new_block.index,
         "block_hash": new_block.hash
     }
 
