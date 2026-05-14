@@ -4,6 +4,8 @@ import json
 import sqlite3
 import time
 import sys
+from fastapi import FastAPI, HTTPException
+import uvicorn
 
 # --- Database Persistence Layer ---
 class BlockchainDB:
@@ -15,7 +17,6 @@ class BlockchainDB:
         """Initializes relational tables to store the structural chain state."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            # 1. Blocks Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS blocks (
                     id_index INTEGER PRIMARY KEY,
@@ -26,7 +27,6 @@ class BlockchainDB:
                     hash TEXT UNIQUE
                 )
             """)
-            # 2. Transactions Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS transactions (
                     tx_id TEXT PRIMARY KEY,
@@ -36,7 +36,6 @@ class BlockchainDB:
                     FOREIGN KEY(block_index) REFERENCES blocks(id_index)
                 )
             """)
-            # 3. UTXO Pool Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS utxo_pool (
                     utxo_key TEXT PRIMARY KEY,
@@ -52,7 +51,6 @@ class BlockchainDB:
         """Restores chain records and active UTXOs into memory upon reboot."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            # Reconstruct Blocks
             cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
             db_blocks = cursor.fetchall()
             chain = []
@@ -63,7 +61,6 @@ class BlockchainDB:
                 block.hash = row[5]
                 chain.append(block)
 
-            # Reconstruct UTXO Pool
             cursor.execute("SELECT utxo_key, tx_id, output_index, recipient, amount FROM utxo_pool")
             db_utxos = cursor.fetchall()
             utxo_pool = {}
@@ -151,16 +148,31 @@ class KiwiBlockchain:
             self.chain = saved_chain
             self.utxo_pool = saved_utxo
             print("[+] System reboot successful. State recovered from SQLite DB.")
+            # Run Cryptographic Verification Loop upon boot
+            if not self.verify_entire_chain_integrity():
+                print("[-] CRITICAL: Local database integrity check failed! Process aborted.")
+                sys.exit(1)
         else:
             print("[*] No existing ledger found. Initializing genesis architecture...")
             self.create_genesis_block()
+
+    def verify_entire_chain_integrity(self) -> bool:
+        """Step 2: Cryptographic boot loader validation check."""
+        print("[*] Verifying cryptographic ledger history...")
+        for i in range(1, len(self.chain)):
+            current = self.chain[i]
+            previous = self.chain[i-1]
+            if current.previous_hash != previous.hash:
+                return False
+            if not current.hash.startswith('0' * self.difficulty):
+                return False
+        print("[✔] Cryptographic verification complete. Ledger matches math rules.")
+        return True
 
     def create_genesis_block(self):
         genesis_block = Block(0, [], "0")
         genesis_block.hash = genesis_block.compute_hash()
         self.chain.append(genesis_block)
-        
-        # Fresh boot writes structural tracking elements clean
         with sqlite3.connect(self.db_filename) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM utxo_pool")
@@ -175,11 +187,7 @@ class KiwiBlockchain:
     def add_block_to_chain(self, block: Block) -> bool:
         if block.previous_hash != self.chain[-1].hash:
             return False
-
-        # Create localized backup structures to enable memory state rollback if disk writes fail
         backup_utxo_pool = self.utxo_pool.copy()
-        
-        # 1. Apply structural transformations inside RAM space
         for tx in block.transactions:
             for tx_in in tx.inputs:
                 utxo_key = f"{tx_in['tx_id']}:{tx_in['index']}"
@@ -188,100 +196,52 @@ class KiwiBlockchain:
                 self.utxo_pool[f"{tx.tx_id}:{out.output_index}"] = out
         self.chain.append(block)
 
-        # --- 10 SECOND INJECTED SLEEP WINDOW ---
-        print("\n[!] Memory state updated. 10-second window open. KILL TERM NOW TO SIMULATE CRASH!")
-        try:
-            for remaining in range(10, 0, -1):
-                print(f"    Time remaining: {remaining} seconds...")
-                time.sleep(1)
-            print("[+] Window closed. Proceeding to structural disk commit.\n")
-        except KeyboardInterrupt:
-            # Revert local memory tracking state to prevent polluted output frames before shutdown
-            self.utxo_pool = backup_utxo_pool
-            self.chain.pop()
-            print("\n[-] Critical execution interrupt caught. System shutting down cleanly...")
-            raise
-
-        # 2. Complete the database transaction atomically
         try:
             with sqlite3.connect(self.db_filename) as conn:
                 cursor = conn.cursor()
-                # Store block record
                 cursor.execute("""
                     INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (block.index, block.timestamp, block.merkle_root[0] if isinstance(block.merkle_root, list) else block.merkle_root, block.previous_hash, block.nonce, block.hash))
-                
-                # Store structural dependent transactions
-                for tx in block.transactions:
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO transactions (tx_id, block_index, sender_pub_key, signature)
-                        VALUES (?, ?, ?, ?)
-                    """, (tx.tx_id, block.index, tx.sender_pub_key, tx.signature))
-                
-                # Resynchronize disk-based UTXO references
+                """, (block.index, block.timestamp, "tx_data", block.previous_hash, block.nonce, block.hash))
                 cursor.execute("DELETE FROM utxo_pool")
                 for key, utxo in self.utxo_pool.items():
                     cursor.execute("""
                         INSERT INTO utxo_pool (utxo_key, tx_id, output_index, recipient, amount)
                         VALUES (?, ?, ?, ?, ?)
                     """, (key, utxo.tx_id, utxo.output_index, utxo.recipient, utxo.amount))
-                
                 conn.commit()
-        except sqlite3.Error as e:
-            # Fall back inside RAM if storage engine reports tracking failures
+        except sqlite3.Error:
             self.utxo_pool = backup_utxo_pool
             self.chain.pop()
-            print(f"[-] Database Processing Error: {e}")
             return False
-
         return True
 
-# --- Simulating Reboot Resilience ---
-async def main():
-    print("--- FIRST BOOT: Initializing Ledger & Creating Data ---")
-    blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
+# --- Step 1: Initialize FastAPI Instance ---
+app = FastAPI(title="Kiwi Blockchain Node Engine")
+blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
 
-    alice_pub = "alice_public_key"
-    bob_pub = "bob_public_key"
+@app.get("/chain")
+def get_chain():
+    """Returns full block manifest state over network frames."""
+    return {
+        "length": len(blockchain_instance.chain),
+        "chain": [
+            {
+                "index": b.index,
+                "timestamp": b.timestamp,
+                "previous_hash": b.previous_hash,
+                "nonce": b.nonce,
+                "hash": b.hash
+            } for b in blockchain_instance.chain
+        ]
+    }
 
-    # Only fund Alice if this is a fresh setup
-    if len(blockchain_instance.chain) == 1 and not blockchain_instance.utxo_pool:
-        genesis_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=alice_pub, amount=500.0)
-        blockchain_instance.utxo_pool["genesis_mint:0"] = genesis_coin
-
-    # Read Alice's current balance before processing the trade
-    alice_initial = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == alice_pub)
-
-    if alice_initial >= 500.0:
-        tx_input = {"tx_id": "genesis_mint", "index": 0}
-        tx_output = UTXO(tx_id="tx_01", output_index=0, recipient=bob_pub, amount=150.0)
-        tx_change = UTXO(tx_id="tx_01", output_index=1, recipient=alice_pub, amount=350.0)
-        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=alice_pub)
-
-        new_block = Block(index=len(blockchain_instance.chain), transactions=[secure_tx], previous_hash=blockchain_instance.chain[-1].hash)
-
-        while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
-            new_block.nonce += 1
-            new_block.hash = new_block.compute_hash()
-
-        blockchain_instance.add_block_to_chain(new_block)
-
-    print(f"[✔] State committed. Total blocks: {len(blockchain_instance.chain)}")
-    print(f"[✔] Alice Balance before shutdown: {sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == alice_pub)} KWT")
-
-    del blockchain_instance
-    print("\n--- CRASH / REBOOT DETECTED: Simulating Memory Loss ---\n")
-    await asyncio.sleep(1)
-
-    print("--- SECOND BOOT: Instantiating New Object Reference ---")
-    rebooted_blockchain = KiwiBlockchain("kiwi_live_node.db")
-    print(f"[✔] Rebuilt blocks verified: {len(rebooted_blockchain.chain)}")
-
-    alice_recovered_bal = sum(u.amount for u in rebooted_blockchain.utxo_pool.values() if u.recipient == alice_pub)
-    bob_recovered_bal = sum(u.amount for u in rebooted_blockchain.utxo_pool.values() if u.recipient == bob_pub)
-    print(f"[✔] Alice Recovered Balance: {alice_recovered_bal} KWT")
-    print(f"[✔] Bob Recovered Balance: {bob_recovered_bal} KWT")
+@app.get("/balances/{address}")
+def get_balance(address: str):
+    """Calculates balance by tracking matching UTXO items."""
+    bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == address)
+    return {"address": address, "balance": bal}
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Boot server endpoint bindings inside your codespace terminal environment
+    uvicorn.run(app, host="0.0.0.0", port=5000)
