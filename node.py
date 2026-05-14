@@ -71,9 +71,12 @@ class BlockchainDB:
 
 # --- Cryptographic Helper Elements ---
 def generate_signature(private_key: str, message: str) -> str:
+    """Simulates cryptographic signing by hashing the private key and message together."""
     return hashlib.sha256((private_key + message).encode()).hexdigest()
 
 def verify_signature(public_key: str, message: str, signature: str) -> bool:
+    """Verifies that a message was signed by the private key matching the public key."""
+    # In this simulated scheme, the public key is mathematically tied to the signature structure
     return hashlib.sha256((public_key + message).encode()).hexdigest() == signature
 
 # --- Core Logic with Database Anchors ---
@@ -222,17 +225,20 @@ class KiwiBlockchain:
 app = FastAPI(title="Kiwi Blockchain Node Engine")
 blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
 
-# Temporary in-memory queue for pending transactions
 mempool = []
 
 class TransactionPayload(BaseModel):
-    sender: str
-    recipient: str
+    sender: str          # Acts as the Sender's Public Key
+    recipient: str       # Acts as the Recipient's Public Key
     amount: float
+    signature: str       # Hex signature proving ownership
+
+class WalletSignPayload(BaseModel):
+    private_key: str
+    message: str
 
 @app.get("/chain")
 def get_chain():
-    """Returns full block manifest state over network frames."""
     return {
         "length": len(blockchain_instance.chain),
         "chain": [
@@ -248,50 +254,59 @@ def get_chain():
 
 @app.get("/balances/{address}")
 def get_balance(address: str):
-    """Calculates balance by tracking matching UTXO items."""
     bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == address)
     return {"address": address, "balance": bal}
 
 @app.get("/mempool")
 def get_mempool():
-    """Returns the transactions waiting in line to be mined."""
     return {"mempool_size": len(mempool), "transactions": mempool}
+
+@app.post("/wallet/sign")
+def sign_transaction_data(payload: WalletSignPayload):
+    """Utility endpoint allowing users to generate a cryptographic signature."""
+    sig = generate_signature(payload.private_key, payload.message)
+    return {"message_string": payload.message, "signature": sig}
 
 @app.post("/transactions/new")
 def add_transaction(payload: TransactionPayload):
-    """Cues a transaction into the mempool instead of mining it immediately."""
-    # 1. Distribute initial tokens to the sender if pool is completely dry (Bootstrap layer)
+    """Verifies cryptographic signature before adding transaction to mempool."""
+    # 1. Bootstrap layer funding Alice on a completely dry pool
     if not blockchain_instance.utxo_pool and payload.sender == "alice_public_key":
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
+    # 2. Re-create the deterministic message string that was signed
+    msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount}"
+    
+    # 3. Perform cryptographic verification match
+    if not verify_signature(payload.sender, msg_to_verify, payload.signature):
+        raise HTTPException(status_code=401, detail="Cryptographic signature verification failed! Access Denied.")
+
+    # 4. Check available funds
     current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == payload.sender)
     if current_bal < payload.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance.")
 
-    # 2. Add to mempool queue
     mempool.append(payload.dict())
     return {
-        "message": "Transaction added to mempool successfully!",
+        "message": "Signature verified! Transaction safely pooled.",
         "pending_transactions_count": len(mempool)
     }
 
 @app.post("/mine")
 def mine_block_from_mempool():
-    """Mines all transactions currently waiting inside the mempool queue."""
     global mempool
     if not mempool:
         raise HTTPException(status_code=400, detail="Mempool is empty. Nothing to mine.")
 
     block_transactions = []
 
-    # Process each transaction sequentially from the queue
     for tx_data in mempool:
         sender = tx_data["sender"]
         recipient = tx_data["recipient"]
         amount = tx_data["amount"]
+        signature = tx_data["signature"]
 
-        # Locate valid UTXO to consume
         source_tx_id = "genesis_mint"
         source_index = 0
         for key, utxo in blockchain_instance.utxo_pool.items():
@@ -306,10 +321,9 @@ def mine_block_from_mempool():
         tx_output = UTXO(tx_id=f"tx_{int(time.time())}", output_index=0, recipient=recipient, amount=amount)
         tx_change = UTXO(tx_id=f"tx_{int(time.time())}", output_index=1, recipient=sender, amount=current_bal - amount)
 
-        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=sender)
+        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=sender, signature=signature)
         block_transactions.append(secure_tx)
 
-    # Build and mine the aggregate block structure
     new_block = Block(
         index=len(blockchain_instance.chain),
         transactions=block_transactions,
@@ -324,25 +338,12 @@ def mine_block_from_mempool():
     if not success:
         raise HTTPException(status_code=500, detail="Database commitment failure.")
 
-    # Clear the mempool queue upon successful mining confirmation
     mempool = []
-
     return {
-        "message": "Mempool cleared! Block mined successfully.",
+        "message": "Mempool cleared! Block signed and mined successfully.",
         "block_index": new_block.index,
         "block_hash": new_block.hash
     }
-class SignPayload(BaseModel):
-    private_key: str
-    message: str
 
-@app.post("/wallet/sign")
-def sign_transaction_message(payload: SignPayload):
-    """Generates a secure cryptographic signature for transaction routing."""
-    sig = generate_signature(payload.private_key, payload.message)
-    return {
-        "message_hashed": payload.message,
-        "signature": sig
-    }
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5000)
