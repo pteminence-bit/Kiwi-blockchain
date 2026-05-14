@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 import sys
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 import uvicorn
 from pydantic import BaseModel
@@ -76,7 +77,6 @@ def generate_signature(private_key: str, message: str) -> str:
 
 def verify_signature(public_key: str, message: str, signature: str) -> bool:
     """Verifies that a message was signed by the private key matching the public key."""
-    # In this simulated scheme, the public key is mathematically tied to the signature structure
     return hashlib.sha256((public_key + message).encode()).hexdigest() == signature
 
 # --- Core Logic with Database Anchors ---
@@ -133,7 +133,7 @@ class Block:
         tx_hashes = [tx.tx_id for tx in self.transactions]
         if not tx_hashes:
             return hashlib.sha256(b"empty").hexdigest()
-        return tx_hashes[0] if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
+        return tx_hashes if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
 
     def compute_hash(self) -> str:
         block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
@@ -221,17 +221,26 @@ class KiwiBlockchain:
             return False
         return True
 
-# --- API Specification Layer ---
-app = FastAPI(title="Kiwi Blockchain Node Engine")
-blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
-
+# Global Application States
+blockchain_instance = None
 mempool = []
 
+# --- Lifespan Manager for Async Initialization Safety ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global blockchain_instance
+    # Instantiate engine safely inside async context loop
+    blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
+    yield
+
+# --- API Specification Layer ---
+app = FastAPI(title="Kiwi Blockchain Node Engine", lifespan=lifespan)
+
 class TransactionPayload(BaseModel):
-    sender: str          # Acts as the Sender's Public Key
-    recipient: str       # Acts as the Recipient's Public Key
+    sender: str
+    recipient: str
     amount: float
-    signature: str       # Hex signature proving ownership
+    signature: str
 
 class WalletSignPayload(BaseModel):
     private_key: str
@@ -263,26 +272,23 @@ def get_mempool():
 
 @app.post("/wallet/sign")
 def sign_transaction_data(payload: WalletSignPayload):
-    """Utility endpoint allowing users to generate a cryptographic signature."""
+    """NATIVE FASTAPI ROUTE: Generates cryptographic wallet signature."""
     sig = generate_signature(payload.private_key, payload.message)
     return {"message_string": payload.message, "signature": sig}
 
 @app.post("/transactions/new")
 def add_transaction(payload: TransactionPayload):
-    """Verifies cryptographic signature before adding transaction to mempool."""
-    # 1. Bootstrap layer funding Alice on a completely dry pool
+    # Bootstrap fallback funding loop
     if not blockchain_instance.utxo_pool and payload.sender == "alice_public_key":
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
-    # 2. Re-create the deterministic message string that was signed
+    # Reconstruct the explicit deterministic payload string
     msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount}"
     
-    # 3. Perform cryptographic verification match
     if not verify_signature(payload.sender, msg_to_verify, payload.signature):
         raise HTTPException(status_code=401, detail="Cryptographic signature verification failed! Access Denied.")
 
-    # 4. Check available funds
     current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == payload.sender)
     if current_bal < payload.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance.")
@@ -300,7 +306,6 @@ def mine_block_from_mempool():
         raise HTTPException(status_code=400, detail="Mempool is empty. Nothing to mine.")
 
     block_transactions = []
-
     for tx_data in mempool:
         sender = tx_data["sender"]
         recipient = tx_data["recipient"]
