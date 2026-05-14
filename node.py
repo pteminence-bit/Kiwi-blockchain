@@ -332,6 +332,17 @@ def mine_block_from_mempool():
         "block_index": new_block.index,
         "block_hash": new_block.hash
     }
+class SignPayload(BaseModel):
+    private_key: str
+    message: str
 
+@app.post("/wallet/sign")
+def sign_transaction_message(payload: SignPayload):
+    """Generates a secure cryptographic signature for transaction routing."""
+    sig = generate_signature(payload.private_key, payload.message)
+    return {
+        "message_hashed": payload.message,
+        "signature": sig
+    }
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5000)
