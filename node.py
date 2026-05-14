@@ -6,6 +6,7 @@ import time
 import sys
 from fastapi import FastAPI, HTTPException
 import uvicorn
+from pydantic import BaseModel
 
 # --- Database Persistence Layer ---
 class BlockchainDB:
@@ -148,7 +149,6 @@ class KiwiBlockchain:
             self.chain = saved_chain
             self.utxo_pool = saved_utxo
             print("[+] System reboot successful. State recovered from SQLite DB.")
-            # Run Cryptographic Verification Loop upon boot
             if not self.verify_entire_chain_integrity():
                 print("[-] CRITICAL: Local database integrity check failed! Process aborted.")
                 sys.exit(1)
@@ -157,7 +157,7 @@ class KiwiBlockchain:
             self.create_genesis_block()
 
     def verify_entire_chain_integrity(self) -> bool:
-        """Step 2: Cryptographic boot loader validation check."""
+        """Cryptographic boot loader validation check."""
         print("[*] Verifying cryptographic ledger history...")
         for i in range(1, len(self.chain)):
             current = self.chain[i]
@@ -188,6 +188,7 @@ class KiwiBlockchain:
         if block.previous_hash != self.chain[-1].hash:
             return False
         backup_utxo_pool = self.utxo_pool.copy()
+        
         for tx in block.transactions:
             for tx_in in tx.inputs:
                 utxo_key = f"{tx_in['tx_id']}:{tx_in['index']}"
@@ -203,6 +204,7 @@ class KiwiBlockchain:
                     INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (block.index, block.timestamp, "tx_data", block.previous_hash, block.nonce, block.hash))
+                
                 cursor.execute("DELETE FROM utxo_pool")
                 for key, utxo in self.utxo_pool.items():
                     cursor.execute("""
@@ -216,9 +218,14 @@ class KiwiBlockchain:
             return False
         return True
 
-# --- Step 1: Initialize FastAPI Instance ---
+# --- API Specification Layer ---
 app = FastAPI(title="Kiwi Blockchain Node Engine")
 blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
+
+class TransactionPayload(BaseModel):
+    sender: str
+    recipient: str
+    amount: float
 
 @app.get("/chain")
 def get_chain():
@@ -242,6 +249,56 @@ def get_balance(address: str):
     bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == address)
     return {"address": address, "balance": bal}
 
+@app.post("/mine")
+def mine_block(payload: TransactionPayload):
+    """Processes an on-demand transaction, mines a block, and updates state."""
+    # 1. Distribute initial tokens to the sender if pool is completely dry
+    if not blockchain_instance.utxo_pool:
+        initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
+        blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
+        
+    # 2. Map standard UTXO tracking context inputs
+    current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == payload.sender)
+    if current_bal < payload.amount:
+        raise HTTPException(status_code=400, detail="Insufficient sender balance tokens.")
+
+    # Find an active key to consume
+    source_tx_id = "genesis_mint"
+    source_index = 0
+    for key, utxo in blockchain_instance.utxo_pool.items():
+        if utxo.recipient == payload.sender:
+            source_tx_id = utxo.tx_id
+            source_index = utxo.output_index
+            break
+
+    tx_input = {"tx_id": source_tx_id, "index": source_index}
+    tx_output = UTXO(tx_id="tx_api", output_index=0, recipient=payload.recipient, amount=payload.amount)
+    change_amount = current_bal - payload.amount
+    tx_change = UTXO(tx_id="tx_api", output_index=1, recipient=payload.sender, amount=change_amount)
+    
+    secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=payload.sender)
+    
+    # 3. Assemble and Mine Block
+    new_block = Block(
+        index=len(blockchain_instance.chain), 
+        transactions=[secure_tx], 
+        previous_hash=blockchain_instance.chain[-1].hash
+    )
+    
+    while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
+        new_block.nonce += 1
+        new_block.hash = new_block.compute_hash()
+        
+    # 4. Commit to SQLite State
+    success = blockchain_instance.add_block_to_chain(new_block)
+    if not success:
+        raise HTTPException(status_code=500, detail="State insertion failure. Ledger rejected block link.")
+        
+    return {
+        "message": "Block mined and saved successfully!", 
+        "block_index": new_block.index, 
+        "block_hash": new_block.hash
+    }
+
 if __name__ == "__main__":
-    # Boot server endpoint bindings inside your codespace terminal environment
     uvicorn.run(app, host="0.0.0.0", port=5000)
