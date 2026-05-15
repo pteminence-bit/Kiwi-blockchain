@@ -178,7 +178,7 @@ class KiwiBlockchain:
             """, (genesis_block.index, genesis_block.timestamp, "empty", genesis_block.previous_hash, genesis_block.nonce, genesis_block.hash))
             conn.commit()
 
-    def add_block_to_chain(self, block: Block) -> bool:
+       def add_block_to_chain(self, block: Block) -> bool:
         if block.previous_hash != self.chain[-1].hash:
             return False
         backup_utxo_pool = self.utxo_pool.copy()
@@ -194,10 +194,14 @@ class KiwiBlockchain:
         try:
             with sqlite3.connect(self.db_filename) as conn:
                 cursor = conn.cursor()
+                
+                # --- FIX: Standardize Merkle Root array conversion to string ---
+                root_str = block.merkle_root[0] if isinstance(block.merkle_root, list) else block.merkle_root
+                
                 cursor.execute("""
                     INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (block.index, block.timestamp, block.merkle_root, block.previous_hash, block.nonce, block.hash))
+                """, (block.index, block.timestamp, root_str, block.previous_hash, block.nonce, block.hash))
                 
                 cursor.execute("DELETE FROM utxo_pool")
                 for key, utxo in self.utxo_pool.items():
@@ -206,11 +210,14 @@ class KiwiBlockchain:
                         VALUES (?, ?, ?, ?, ?)
                     """, (key, utxo.tx_id, utxo.output_index, utxo.recipient, utxo.amount))
                 conn.commit()
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            # Print the exact database error to the console for tracking visibility
+            print(f"[-] SQLite Error: {e}")
             self.utxo_pool = backup_utxo_pool
             self.chain.pop()
             return False
         return True
+
 
 # Global Application States
 blockchain_instance = None
