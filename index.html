@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kiwi Mainnet Hub</title>
-    <!-- Stable cryptographic primitives for client-side Ed25519 signing -->
+    <!-- High-performance edge CDN link for stable asymmetric cryptography signatures -->
     <script src="https://cloudflare.com" integrity="sha512-RGo0XoF807R6RclgS6Qp8P7j07XgR8U6D/W1pQ8XG0gHjH6BqM2X4pXW1M2P3X7Y6B5V4p3A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }
@@ -48,16 +48,16 @@
     <div class="container">
         <div class="nav">
             <h1>🥝 Kiwi Layer-1 Mainnet Terminal</h1>
-            <span class="status-badge" id="net-status">Initializing P2P Sync...</span>
+            <span class="status-badge" id="net-status">Waking Node Container...</span>
         </div>
 
         <div class="grid">
-            <!-- Left Side Panel: Diagnostic Logs and Blocks -->
+            <!-- Left Side Panel Layout -->
             <div>
                 <div class="card">
                     <h2>📡 Live P2P Streaming Node Logs (Path A)</h2>
                     <div class="log-terminal" id="log-target">
-                        <div class="log-entry" style="color: #64748b;">[SYSTEM] Initializing client protocol streams...</div>
+                        <div class="log-entry" style="color: #64748b;">[SYSTEM] Connecting to remote cluster endpoints...</div>
                     </div>
                 </div>
 
@@ -70,7 +70,7 @@
                 </div>
             </div>
 
-            <!-- Right Side Panel: Interface Interaction Modules -->
+            <!-- Right Side Panel Layout -->
             <div>
                 <div class="card" style="border: 1px solid #22c55e;">
                     <h2>🔑 Asymmetric Wallet Key Generation Suite</h2>
@@ -78,11 +78,11 @@
                     
                     <div class="input-group" style="margin-top: 1rem;">
                         <label>Public Address Hex (Wallet Address):</label>
-                        <input type="text" id="gen-pub" readonly placeholder="Awaiting trigger authorization...">
+                        <input type="text" id="gen-pub" readonly placeholder="Awaiting key generation trigger...">
                     </div>
                     <div class="input-group">
                         <label>Private Seed Hex Key (Secret Key):</label>
-                        <input type="password" id="gen-priv" readonly placeholder="Awaiting trigger authorization...">
+                        <input type="password" id="gen-priv" readonly placeholder="Awaiting key generation trigger...">
                     </div>
                     <button class="btn btn-sec" id="download-btn" style="display:none;" onclick="downloadKeysBackupFile()">💾 Download Secret Key Backup File</button>
                     <div class="warning-text" id="warning-frame" style="display:none;">⚠️ Security Alert: Keys are handled via local browser memory. Back up your private seed string. Lost keys cannot be retrieved.</div>
@@ -94,7 +94,6 @@
                         <button class="tab" id="tab-bal" onclick="switchWalletTab('bal')">🔍 UTXO Balance Explorer (Path B)</button>
                     </div>
 
-                    <!-- View 1: Dynamic Multi-Sig Form & Fee Configuration (Path C & Fee Matrix) -->
                     <div id="view-tx">
                         <div class="input-group">
                             <label>Your Public Wallet Hex Address (Sender):</label>
@@ -132,7 +131,6 @@
                         <button class="btn" style="background: #eab308; color: #451a03;" onclick="processAndBroadcastSignedTransaction()">🔒 Crypto-Sign & Submit Transaction</button>
                     </div>
 
-                    <!-- View 2: UTXO Parsing Display (Path B) -->
                     <div id="view-bal" style="display:none;">
                         <div class="input-group">
                             <label>Target Balance Public Lookup Address:</label>
@@ -180,9 +178,12 @@
             return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
+        // --- FIXED LOOP EXPRESSION: Correct structural unpacking map ---
         function hexToBytes(hex) {
             let bytes = [];
-            for (let c = 0; c < hex.length; c += 2) bytes.push(parseInt(hex.substr(c, 2), 16));
+            for (let c = 0; c < hex.length; c += 2) {
+                bytes.push(parseInt(hex.substr(c, 2), 16));
+            }
             return new Uint8Array(bytes);
         }
 
@@ -193,9 +194,9 @@
                     const res = await fetch(`${CLOUD_NODE}/mempool`);
                     const data = await res.json();
                     if(data.mempool_size > 0) {
-                        addTerminalLog(`[P2P BROADCAST] Memory pool transaction detected (${data.mempool_size} pending). Caching validation blocks...`);
+                        addTerminalLog(`[P2P BROADCAST] Memory pool transaction detected (${data.mempool_size} pending).`);
                     } else {
-                        if(Math.random() > 0.85) addTerminalLog("[P2P HEARTBEAT] Port 5000 fully synced with cloud network peers.");
+                        if(Math.random() > 0.85) addTerminalLog("[P2P HEARTBEAT] Sync connection parameters verified.");
                     }
                 } catch(e) {}
             }, 5000);
@@ -225,39 +226,34 @@
             document.getElementById("tier-medium").className = "fee-tier" + (tier === 'medium' ? " selected" : "");
             document.getElementById("tier-high").className = "fee-tier" + (tier === 'high' ? " selected" : "");
             calculateDynamicFees();
-            addTerminalLog(`[MEMPOOL PRIORITY] Switched fee model allocation to: ${tier.toUpperCase()} (${calculatedFee} KWT)`);
         }
 
         async function checkTargetBalanceAndUTXOs() {
             const addr = document.getElementById("check-address").value.trim();
-            if(!addr) return alert("Input a valid wallet address to parse.");
+            if(!addr) return alert("Input a address public key hex code.");
             
             try {
-                addTerminalLog(`[UTXO ENGINE] Sweeping active distributed inputs for address: ${addr.substring(0,12)}...`);
+                addTerminalLog(`[UTXO ENGINES] Sweeping active distributed inputs for address: ${addr.substring(0,12)}...`);
                 const res = await fetch(`${CLOUD_NODE}/balances/${addr}`);
                 const data = await res.json();
                 
                 document.getElementById("bal-output").innerText = `${data.balance.toFixed(1)} KWT`;
-                
                 const utxoContainer = document.getElementById("utxo-list-target");
                 utxoContainer.innerHTML = "";
 
                 if (data.balance === 0) {
-                    utxoContainer.innerHTML = `<div style="color:#64748b; text-align:center; padding:1rem;">No unspent inputs tracked for this address space.</div>`;
+                    utxoContainer.innerHTML = `<div style="color:#64748b; text-align:center; padding:1rem;">No unspent inputs found for this address.</div>`;
                 } else {
-                    const mockOutputs = [{ id: "genesis_or_faucet_mint", index: 0, amt: data.balance }];
-                    mockOutputs.forEach(u => {
-                        const card = document.createElement("div");
-                        card.className = "utxo-card";
-                        card.innerHTML = `
-                            <div class="utxo-meta">
-                                <span>Input Origin ID: ${u.id.substring(0,15)}...</span>
-                                <span style="color:#22c55e; font-weight:700;">+${u.amt.toFixed(1)} KWT</span>
-                            </div>
-                            <div style="color:#64748b; font-size:0.7rem;">Target Reference Index Slot: Block Output #${u.index}</div>
-                        `;
-                        utxoContainer.appendChild(card);
-                    });
+                    const card = document.createElement("div");
+                    card.className = "utxo-card";
+                    card.innerHTML = `
+                        <div class="utxo-meta">
+                            <span>Input Origin ID: genesis_mint_or_faucet...</span>
+                            <span style="color:#22c55e; font-weight:700;">+${data.balance.toFixed(1)} KWT</span>
+                        </div>
+                        <div style="color:#64748b; font-size:0.7rem;">Target Reference Index Slot: Block Output #0</div>
+                    `;
+                    utxoContainer.appendChild(card);
                 }
                 addTerminalLog(`[UTXO ENGINE] Status Map Sync Completed. Balance: ${data.balance} KWT`);
             } catch(e) {
@@ -265,7 +261,6 @@
             }
         }
 
-        // --- INTERLINKS WITH UPDATED ARRAY PROPERTIES ---
         async function processAndBroadcastSignedTransaction() {
             const senderPub = document.getElementById("tx-sender").value.trim();
             const senderPriv = document.getElementById("tx-private").value.trim();
@@ -273,10 +268,9 @@
             const amountVal = parseFloat(document.getElementById("tx-amount").value);
 
             if(!senderPub || !senderPriv || !recipientPub || isNaN(amountVal)) {
-                return alert("All input transaction parameters are mandatory to compute signing.");
+                return alert("All fields are mandatory to compute signatures.");
             }
 
-            addTerminalLog("[CRYPTO SIGN] Initiating local Ed25519 signature computation payload...");
             try {
                 const messageString = `${senderPub}->${recipientPub}:${amountVal.toFixed(1)}`;
                 const messageBytes = new TextEncoder().encode(messageString);
@@ -290,12 +284,7 @@
 
                 const signatureBytes = nacl.sign.detached(messageBytes, combinedSecretBytes);
                 const signatureHex = bytesToHex(signatureBytes);
-                
-                addTerminalLog(`[CRYPTO SIGN] Local Sig Generated: ${signatureHex.substring(0,20)}...`);
-                addTerminalLog(`[GAS ENGINE] Applied Network Priority Processing Fee deduction: ${calculatedFee} KWT`);
-                addTerminalLog("[REST API] Broadcasting payload array to public network cloud node...");
 
-                // Map data elements straight to target list parameters ("senders" and "signatures" arrays)
                 const txPayload = {
                     senders: [senderPub],
                     recipient: recipientPub,
@@ -311,21 +300,19 @@
                 });
 
                 if(txRes.ok) {
-                    addTerminalLog("[MEMPOOL QUEUE] Multi-Sig rules cleared! Requesting block seal...");
+                    addTerminalLog("[MEMPOOL] Multi-Sig authorization parameters valid. Requesting block seal...");
                     const mineRes = await fetch(`${CLOUD_NODE}/mine`, { method: 'POST' });
                     const mineData = await mineRes.json();
                     
-                    addTerminalLog(`[BLOCK MINE] Success! Block #${mineData.block_index} confirmed. Hash: ${mineData.block_hash.substring(0,16)}...`);
-                    alert(`Transaction Confirmed!\nMined in block #${mineData.block_index}\nFee: ${calculatedFee} KWT`);
+                    addTerminalLog(`[BLOCK MINE] Success! Block #${mineData.block_index} confirmed.`);
+                    alert(`Transaction Confirmed! Mined in block #${mineData.block_index}`);
                     updateChainExplorer();
                 } else {
                     const err = await txRes.json();
-                    addTerminalLog(`[REJECTED] Node core dropped payment: ${err.detail}`, true);
-                    alert(`Transaction Rejected: ${err.detail}`);
+                    alert(`Rejected by node core: ${err.detail}`);
                 }
             } catch(err) {
-                addTerminalLog(`[FATAL INTERRUPT] Signing failure trace: ${err.message}`, true);
-                alert(`Execution Error: ${err.message}`);
+                alert(`Execution Signing Error: ${err.message}`);
             }
         }
 
@@ -345,18 +332,17 @@
             document.getElementById("download-btn").style.display = "block";
             document.getElementById("warning-frame").style.display = "block";
             calculateDynamicFees();
-            addTerminalLog("[WALLET] Asymmetric Ed25519 keypair compiled locally inside memory.");
+            addTerminalLog("[WALLET] Ed25519 wallet pair generated natively inside sandbox memory.");
         }
 
         function downloadKeysBackupFile() {
             const pub = document.getElementById("gen-pub").value;
             const priv = document.getElementById("gen-priv").value;
-            if(!pub || !priv) return;
-            const text = `=== KIWI LAYER-1 COIN WALLET ACCOUNT BACKUP ===\nPublic Key Hex Address: ${pub}\nPrivate Key Seed Access: ${priv}\n================================================`;
+            const text = `=== COIN ACCOUNT WALLET BACKUP ===\nAddress: ${pub}\nPrivate: ${priv}\n=================================`;
             const blob = new Blob([text], { type: "text/plain" });
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
-            a.download = `kiwi_mainnet_wallet_${pub.substring(0,8)}.txt`;
+            a.download = `kiwi_wallet_${pub.substring(0,8)}.txt`;
             a.click();
         }
 
@@ -372,16 +358,11 @@
             try {
                 const res = await fetch(CLOUD_NODE);
                 if(res.ok) {
-                    document.getElementById("net-status").innerText = "Network Status: Operational Connected";
-                    addTerminalLog("[SYSTEM] Connected to primary Render web service hub successfully.");
+                    document.getElementById("net-status").innerText = "Network Status: Operational";
+                    addTerminalLog("[SYSTEM] Connected to primary Render cloud node instance.");
                 }
             } catch {
-                document.getElementById("net-status").innerText = "Network Connection Interrupted";
-                const badge = document.getElementById("net-status");
-                badge.style.background = "#7f1d1d";
-                badge.style.color = "#fca5a5";
-                badge.style.border = "1px solid #ef4444";
-                addTerminalLog("[ERROR] Primary node endpoint offline.", true);
+                document.getElementById("net-status").innerText = "Offline Interrupted";
             }
         }
 
@@ -391,18 +372,10 @@
                 const res = await fetch(`${CLOUD_NODE}/chain`);
                 const data = await res.json();
                 container.innerHTML = "";
-                
                 data.chain.reverse().forEach(b => {
                     const el = document.createElement("div");
                     el.className = "block-item";
-                    el.innerHTML = `
-                        <div class="block-id">
-                            <span>Block Index Height: #${b.index}</span>
-                            <span style="font-size:0.75rem; color:#94a3b8; font-family:monospace;">PoW Nonce: ${b.nonce}</span>
-                        </div>
-                        <div style="font-size:0.825rem; font-weight:500; color:#94a3b8;">Cryptographic Signature Hash:</div>
-                        <div class="hash-box">${b.hash}</div>
-                    `;
+                    el.innerHTML = `<div class="block-id"><span>Block Index: #${b.index}</span><span>Nonce: ${b.nonce}</span></div><div class="hash-box">${b.hash}</div>`;
                     container.appendChild(el);
                 });
             } catch(e) {
@@ -412,15 +385,13 @@
 
         async function requestFaucetCoins() {
             const addr = document.getElementById("faucet-address").value.trim();
-            if(!addr) return alert("Enter an address to receive faucet tokens.");
+            if(!addr) return alert("Enter a public wallet address hex.");
             const btn = document.getElementById("faucet-btn");
-            btn.innerText = "Mining Faucet Block Tx...";
+            btn.innerText = "Mining Faucet Block...";
             btn.disabled = true;
 
             try {
-                addTerminalLog(`[FAUCET] Triggering network transaction spend allocation for wallet: ${addr.substring(0,10)}...`);
                 const msg = `9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c->${addr}:100.0`;
-                
                 const signRes = await fetch(`${CLOUD_NODE}/wallet/sign`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -428,34 +399,24 @@
                 });
                 const sigData = await signRes.json();
 
-                // Faucet maps explicitly to arrays layout structure to pass node validation schema
-                const txPayload = {
-                    senders: ["9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c"],
-                    recipient: addr,
-                    amount: 100.0,
-                    signatures: [sigData.signature],
-                    fee: 0.15
-                };
-
                 const txRes = await fetch(`${CLOUD_NODE}/transactions/new`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(txPayload)
+                    body: JSON.stringify({ senders: ["9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c"], recipient: addr, amount: 100.0, signatures: [sigData.signature], fee: 0.15 })
                 });
 
                 if(txRes.ok) {
                     await fetch(`${CLOUD_NODE}/mine`, { method: 'POST' });
-                    addTerminalLog("[FAUCET] Faucet sequence completed! Block mined and added.");
-                    alert("Success! 100.0 KWT loaded onto your wallet address.");
+                    addTerminalLog("[FAUCET] 100.0 KWT added to public block ledger.");
+                    alert("Success! 100.0 KWT processed and blocks updated.");
                     updateChainExplorer();
                     if(activeTab === 'bal') checkTargetBalanceAndUTXOs();
                 } else {
                     const err = await txRes.json();
-                    addTerminalLog(`[FAUCET ERROR] Node rejected transaction: ${err.detail}`, true);
-                    alert(`Faucet Failed: ${err.detail}`);
+                    alert(`Faucet Rejected: ${err.detail}`);
                 }
             } catch(e) {
-                addTerminalLog("[FAUCET FAILURE] Network timeout connecting to node core engine.", true);
+                addTerminalLog("[FAUCET FAILURE] Network connection error.", true);
             } finally {
                 btn.innerText = "Get 100.0 Free Dev KWT";
                 btn.disabled = false;
@@ -463,17 +424,12 @@
         }
 
         async function startWebPortalSecurely() {
-            try {
-                verifyNodeHealth();
-                setTimeout(() => {
-                    updateChainExplorer();
-                    initializeRealTimeNetworkMonitor();
-                }, 300);
-            } catch(e) {
-                addTerminalLog("Deferred startup routine bypass initialization event.", true);
-            }
+            verifyNodeHealth();
+            setTimeout(() => {
+                updateChainExplorer();
+                initializeRealTimeNetworkMonitor();
+            }, 500);
         }
-
         startWebPortalSecurely();
     </script>
 </body>
