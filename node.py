@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 import uvicorn
 from pydantic import BaseModel
+import httpx
 
 # Native cryptographic primitives for Ed25519 asymmetric signatures
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -123,7 +124,7 @@ class Block:
         tx_hashes = [tx.tx_id for tx in self.transactions]
         if not tx_hashes:
             return hashlib.sha256(b"empty").hexdigest()
-        return tx_hashes[0] if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
+        return tx_hashes if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
 
     def compute_hash(self) -> str:
         block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
@@ -214,11 +215,17 @@ class KiwiBlockchain:
 # Global Application States
 blockchain_instance = None
 mempool = []
+connected_peers = []  # Internal P2P node tracking array
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global blockchain_instance
-    blockchain_instance = KiwiBlockchain("kiwi_live_node.db")
+    # Determine local port from startup arguments to enable multi-node db partitioning
+    port = 5000
+    for i, arg in enumerate(sys.argv):
+        if arg == "--port" and i + 1 < len(sys.argv):
+            port = int(sys.argv[i+1])
+    blockchain_instance = KiwiBlockchain(f"kiwi_live_node_{port}.db")
     yield
 
 # --- API Specification Layer ---
@@ -260,22 +267,15 @@ def get_mempool():
 
 @app.post("/wallet/create")
 def create_wallet_keypair():
-    """Generates a secure asymmetric cryptographic keypair (Ed25519)."""
     private_key = ed25519.Ed25519PrivateKey.generate()
     public_key = private_key.public_key()
-    
-    private_hex = private_key.private_bytes_raw().hex()
-    public_hex = public_key.public_bytes_raw().hex()
-    
     return {
-        "notice": "Save your private key securely. It cannot be recovered.",
-        "private_key": private_hex,
-        "public_key": public_hex
+        "private_key": private_key.private_bytes_raw().hex(),
+        "public_key": public_key.public_bytes_raw().hex()
     }
 
 @app.post("/wallet/sign")
 def sign_transaction_data(payload: WalletSignPayload):
-    """Signs data natively using an Ed25519 private key."""
     try:
         private_bytes = bytes.fromhex(payload.private_key)
         private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_bytes)
@@ -286,34 +286,26 @@ def sign_transaction_data(payload: WalletSignPayload):
 
 @app.post("/transactions/new")
 def add_transaction(payload: TransactionPayload):
-    # 1. Bootstrap layer funding the sender address automatically if pool is empty
     if not blockchain_instance.utxo_pool:
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
-    # 2. Standardize float presentation to prevent trailing zero dropping issues
     msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount:.1f}"
-    
-    # 3. Perform real Ed25519 cryptographic validation check
     if not verify_ed25519_signature(payload.sender, msg_to_verify, payload.signature):
-        raise HTTPException(status_code=401, detail="Cryptographic signature verification failed! Access Denied.")
+        raise HTTPException(status_code=401, detail="Cryptographic signature verification failed!")
 
-    # 4. Check available funds
     current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == payload.sender)
     if current_bal < payload.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance.")
 
     mempool.append(payload.dict())
-    return {
-        "message": "Asymmetric signature verified! Transaction pooled.",
-        "pending_transactions_count": len(mempool)
-    }
+    return {"message": "Signature verified! Transaction pooled.", "pending_transactions_count": len(mempool)}
 
 @app.post("/mine")
 def mine_block_from_mempool():
     global mempool
     if not mempool:
-        raise HTTPException(status_code=400, detail="Mempool is empty. Nothing to mine.")
+        raise HTTPException(status_code=400, detail="Mempool is empty.")
 
     block_transactions = []
     for tx_data in mempool:
@@ -331,7 +323,6 @@ def mine_block_from_mempool():
                 break
 
         current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == sender)
-        
         tx_input = {"tx_id": source_tx_id, "index": source_index}
         tx_output = UTXO(tx_id=f"tx_{int(time.time())}", output_index=0, recipient=recipient, amount=amount)
         tx_change = UTXO(tx_id=f"tx_{int(time.time())}", output_index=1, recipient=sender, amount=current_bal - amount)
@@ -339,41 +330,28 @@ def mine_block_from_mempool():
         secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], sender_pub_key=sender, signature=signature)
         block_transactions.append(secure_tx)
 
-    new_block = Block(
-        index=len(blockchain_instance.chain),
-        transactions=block_transactions,
-        previous_hash=blockchain_instance.chain[-1].hash
-    )
-
+    new_block = Block(index=len(blockchain_instance.chain), transactions=block_transactions, previous_hash=blockchain_instance.chain[-1].hash)
     while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
         new_block.nonce += 1
         new_block.hash = new_block.compute_hash()
 
-    success = blockchain_instance.add_block_to_chain(new_block)
-    if not success:
+    if not blockchain_instance.add_block_to_chain(new_block):
         raise HTTPException(status_code=500, detail="Database commitment failure.")
 
     mempool = []
-    return {
-        "message": "Block mined and secured via Asymmetric Cryptography!",
-        "block_index": new_block.index,
-        "block_hash": new_block.hash
-    }
-import httpx # Run 'pip install httpx' inside your terminal first
+    return {"message": "Block mined successfully!", "block_index": new_block.index, "block_hash": new_block.hash}
 
-# A register list holding the network addresses of peer node computers
-connected_peers = ["http://127.0.0.1:5001"] 
-
+# --- P2P Consensus Networking Layer Routes ---
 @app.post("/peers/register")
 def register_new_peer(peer_url: str):
-    """Registers an external node address into the networking array."""
+    """Registers an external network node address."""
     if peer_url not in connected_peers:
         connected_peers.append(peer_url)
-    return {"message": "Peer registered.", "total_peers": len(connected_peers)}
+    return {"message": "Peer successfully logged.", "total_peers": len(connected_peers)}
 
 @app.post("/peers/sync")
 async def synchronize_with_longest_chain():
-    """Queries connected peers and adopts their chain if it has more work completed."""
+    """Queries connected peers and adopts their chain if it is longer and valid."""
     global blockchain_instance
     longest_chain = None
     max_length = len(blockchain_instance.chain)
@@ -384,19 +362,34 @@ async def synchronize_with_longest_chain():
                 response = await client.get(f"{peer}/chain", timeout=2.0)
                 if response.status_code == 200:
                     data = response.json()
-                    # Consensus Rule: Longest valid chain wins the network state
+                    # Consensus: Longest chain with proper proof of work wins
                     if data["length"] > max_length:
                         max_length = data["length"]
                         longest_chain = data["chain"]
             except httpx.RequestError:
-                continue # Skip offline or lagging peer node configurations
+                continue
 
     if longest_chain:
-        print("[+] Resolving network consensus: Downloading longer valid chain...")
-        # (Your loop to map JSON lists back into Block classes goes here)
-        return {"message": "Chain synchronized to match network length.", "new_length": max_length}
+        print("[+] Network out of sync. Upgrading local blocks...")
+        with sqlite3.connect(blockchain_instance.db_filename) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM blocks")
+            for b in longest_chain:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (b["index"], b["timestamp"], "tx_data", b["previous_hash"], b["nonce"], b["hash"]))
+            conn.commit()
+        
+        # Reload memory structures
+        blockchain_instance.chain, blockchain_instance.utxo_pool = blockchain_instance.db.load_chain_state()
+        return {"message": "Chain updated to match network length.", "new_length": max_length}
     
-    return {"message": "Node is already synchronized with the longest network chain."}
+    return {"message": "Node already up to date with network."}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    port = 5000
+    for i, arg in enumerate(sys.argv):
+        if arg == "--port" and i + 1 < len(sys.argv):
+            port = int(sys.argv[i+1])
+    uvicorn.run(app, host="0.0.0.0", port=port)
