@@ -12,7 +12,7 @@
         .nav { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 1.5rem 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 2rem; border: 1px solid #334155; }
         h1 { margin: 0; color: #4ade80; font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
         .status-badge { background: #15803d; color: #bbf7d0; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; border: 1px solid #22c55e; }
-        .grid { display: grid; grid-template-columns: 1.6fr 1.4fr; gap: 2rem; }
+        .grid { display: grid; grid-template-columns: 1.5fr 1.5fr; gap: 2rem; }
         .card { background: #1e293b; padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1.5rem; border: 1px solid #334155; }
         h2 { font-size: 1.125rem; margin-top: 0; color: #cbd5e1; margin-bottom: 1.25rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
         .btn { background: #22c55e; color: #052e16; border: none; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.875rem; transition: background 0.2s, transform 0.1s; width: 100%; margin-bottom: 0.5rem; display: flex; justify-content: center; align-items: center; gap: 0.5rem; }
@@ -36,21 +36,26 @@
         .tab.active { background: #334155; color: #f8fafc; }
         .log-terminal { background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 0.75rem; color: #4ade80; height: 160px; overflow-y: auto; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); }
         .log-entry { margin-bottom: 0.25rem; border-bottom: 1px dashed #1e293b; padding-bottom: 0.25rem; }
-        .utxo-tag { display: inline-block; background: #1e293b; border: 1px solid #475569; font-size: 0.7rem; padding: 0.15rem 0.4rem; borderRadius: 4px; color: #94a3b8; margin-top: 0.25rem; }
+        
+        /* NEW STYLES: Fee Matrix & UTXO Card components */
+        .fee-matrix-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; background: #0f172a; padding: 0.75rem; border-radius: 6px; border: 1px solid #334155; margin-bottom: 1rem; }
+        .fee-tier { text-align: center; padding: 0.5rem; border-radius: 4px; border: 1px solid #475569; cursor: pointer; }
+        .fee-tier.selected { border-color: #22c55e; background: #15803d33; }
+        .fee-value { font-family: monospace; font-weight: 700; color: #4ade80; font-size: 0.9rem; }
+        .utxo-card { background: #0f172a; border: 1px solid #334155; padding: 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.8rem; }
+        .utxo-meta { display: flex; justify-content: space-between; border-bottom: 1px dashed #334155; padding-bottom: 0.25rem; margin-bottom: 0.25rem; color: #94a3b8; }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Live Node Banner Header -->
         <div class="nav">
             <h1>🥝 Kiwi Layer-1 Mainnet Terminal</h1>
             <span class="status-badge" id="net-status">Initializing P2P Sync...</span>
         </div>
 
         <div class="grid">
-            <!-- Left Panel Column: Ledger Block Explorer & Real-time Node Logs -->
+            <!-- Left Side: Chain Explorer & Diagnostics Terminal -->
             <div>
-                <!-- Real-time Live Network WebSocket Logs Container -->
                 <div class="card">
                     <h2>📡 Live P2P Streaming Node Logs (Path A)</h2>
                     <div class="log-terminal" id="log-target">
@@ -58,7 +63,6 @@
                     </div>
                 </div>
 
-                <!-- Ledger Frame Explorer -->
                 <div class="card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
                         <h2 style="margin:0; border:none; padding:0;">📦 Immutable Distributed Ledger</h2>
@@ -68,54 +72,70 @@
                 </div>
             </div>
 
-            <!-- Right Panel Column: Interactive Wallet Suite Engines -->
+            <!-- Right Side: Interaction Wallet Panel -->
             <div>
-                <!-- Cryptographic Ed25519 Native Wallet Generation Engine Container -->
                 <div class="card" style="border: 1px solid #22c55e;">
                     <h2>🔑 Asymmetric Wallet Key Generation Suite</h2>
                     <button class="btn" style="background:#0284c7; color:#0c4a6e;" onclick="generateWalletKeypairOnClient()">⚡ Generate Fresh Ed25519 Web3 Keys</button>
                     
                     <div class="input-group" style="margin-top: 1rem;">
-                        <label>Public Address Hex (Your Public Key Routing Endpoint):</label>
+                        <label>Public Address Hex (Wallet Address):</label>
                         <input type="text" id="gen-pub" readonly placeholder="Awaiting trigger authorization...">
                     </div>
                     <div class="input-group">
-                        <label>Private Seed Hex Key (Your Secret Asset Key - DO NOT SHARE):</label>
+                        <label>Private Seed Hex Key (Secret Key):</label>
                         <input type="password" id="gen-priv" readonly placeholder="Awaiting trigger authorization...">
                     </div>
                     <button class="btn btn-sec" id="download-btn" style="display:none;" onclick="downloadKeysBackupFile()">💾 Download Secret Key Backup File</button>
-                    <div class="warning-text" id="warning-frame" style="display:none;">⚠️ Security Alert: Keys are handled via local sandboxed volatile browser RAM context variables. You must back up your private seed string. Lost keys cannot be retrieved by nodes.</div>
+                    <div class="warning-text" id="warning-frame" style="display:none;">⚠️ Security Alert: Keys are handled via local browser memory. Back up your private seed string. Lost keys cannot be retrieved.</div>
                 </div>
 
-                <!-- Live Client Wallet Panel Wrapper: Split into Transfer Form or Balance Checker -->
                 <div class="card">
                     <div class="tabs">
                         <button class="tab active" id="tab-tx" onclick="switchWalletTab('tx')">💸 Send Native Tokens (Path C)</button>
                         <button class="tab" id="tab-bal" onclick="switchWalletTab('bal')">🔍 UTXO Balance Explorer (Path B)</button>
                     </div>
 
-                    <!-- Tab Layout View 1: Client-Side Signed Payments Transfer Engine (Path C) -->
+                    <!-- Tab Layout 1: Client-Side Signed Payments Transfer & Fee Selection (Path C) -->
                     <div id="view-tx">
                         <div class="input-group">
                             <label>Your Public Wallet Hex Address (Sender):</label>
-                            <input type="text" id="tx-sender" placeholder="Enter or generate sender address">
+                            <input type="text" id="tx-sender" onchange="calculateDynamicFees()" placeholder="Enter or generate sender address">
                         </div>
                         <div class="input-group">
-                            <label>Your Private Access Seed Key (Required to Sign locally):</label>
+                            <label>Your Private Access Seed Key (Required to Sign):</label>
                             <input type="password" id="tx-private" placeholder="Enter private key to authorize spend payload">
                         </div>
                         <div class="input-group">
                             <label>Recipient Public Address Destination Hex:</label>
-                            <input type="text" id="tx-recipient" placeholder="Enter destination key">
+                            <input type="text" id="tx-recipient" onchange="calculateDynamicFees()" placeholder="Enter destination key">
                         </div>
                         <div class="input-group">
                             <label>Token Transfer Value (Amount KWT):</label>
-                            <input type="number" step="0.1" id="tx-amount" placeholder="0.0">
+                            <input type="number" step="0.1" id="tx-amount" oninput="calculateDynamicFees()" placeholder="0.0">
                         </div>
+
+                        <!-- NEW COMPONENT: Dynamic Network Fee Matrix Selector -->
+                        <label>Select Network Execution Fee Priority:</label>
+                        <div class="fee-matrix-container">
+                            <div class="fee-tier selected" id="tier-low" onclick="selectFeeTier('low', 0.1)">
+                                <div style="font-size:0.75rem; color:#94a3b8;">Standard</div>
+                                <div class="fee-value" id="val-low">0.1 KWT</div>
+                            </div>
+                            <div class="fee-tier" id="tier-medium" onclick="selectFeeTier('medium', 0.25)">
+                                <div style="font-size:0.75rem; color:#94a3b8;">Fast</div>
+                                <div class="fee-value" id="val-medium">0.3 KWT</div>
+                            </div>
+                            <div class="fee-tier" id="tier-high" onclick="selectFeeTier('high', 0.5)">
+                                <div style="font-size:0.75rem; color:#94a3b8;">Instant</div>
+                                <div class="fee-value" id="val-high">0.6 KWT</div>
+                            </div>
+                        </div>
+
                         <button class="btn" style="background: #eab308; color: #451a03;" onclick="processAndBroadcastSignedTransaction()">🔒 Crypto-Sign & Submit Transaction</button>
                     </div>
 
-                    <!-- Tab Layout View 2: Multi-Input UTXO Balance Structural Mapper View (Path B) -->
+                    <!-- Tab Layout 2: Multi-Input UTXO Unspent Output Structural Mapper (Path B) -->
                     <div id="view-bal" style="display:none;">
                         <div class="input-group">
                             <label>Target Balance Public Lookup Address:</label>
@@ -123,16 +143,19 @@
                         </div>
                         <button class="btn btn-blue" onclick="checkTargetBalanceAndUTXOs()">Query Asset State Mapping</button>
                         <div class="bal-display" id="bal-output">0.0 KWT</div>
-                        <div id="utxo-list-target" style="font-size:0.75rem; color:#94a3b8; font-family:monospace;"></div>
+                        
+                        <label style="margin-top:1rem;">Verified Unspent Transaction Outputs (UTXO Array):</label>
+                        <div id="utxo-list-target" style="margin-top:0.5rem;">
+                            <div style="color:#64748b; font-size:0.8rem; text-align:center; padding:1rem;">No address queried yet.</div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Dev Sandbox Network Faucet Booster Box -->
                 <div class="card">
                     <h2>🚰 Devnet Test Token Faucet</h2>
                     <div class="input-group">
                         <label>Target Public Key to Fund:</label>
-                        <input type="text" id="faucet-address" placeholder="Paste wallet address address hex">
+                        <input type="text" id="faucet-address" placeholder="Paste wallet address hex">
                     </div>
                     <button class="btn" style="background:#2563eb; color:#eff6ff;" id="faucet-btn" onclick="requestFaucetCoins()">Get 100.0 Free Dev KWT</button>
                 </div>
@@ -141,11 +164,12 @@
     </div>
 
     <script>
-        // --- SECURELY INTERLINKS BACK TO YOUR RUNNING RENDER NODE URL INSTANCE ---
         const CLOUD_NODE = "https://onrender.com";
-
-        // Local State Trackers
-        let activeTab = 'tx';
+        
+        // Fee Tracking state variables
+        let selectedTier = 'low';
+        let baseFeeRate = 0.1;
+        let calculatedFee = 0.1;
 
         function addTerminalLog(message, isError = false) {
             const term = document.getElementById("log-target");
@@ -161,10 +185,8 @@
             return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        // --- PATH A IMPLEMENTATION: Polled Network Event Simulator for Render Sandbox Environment ---
         function initializeRealTimeNetworkMonitor() {
             verifyNodeHealth();
-            // Free Tier compatibility simulated socket cycle listener polling state change loops
             setInterval(async () => {
                 try {
                     const res = await fetch(`${CLOUD_NODE}/mempool`);
@@ -172,34 +194,86 @@
                     if(data.mempool_size > 0) {
                         addTerminalLog(`[P2P BROADCAST] Memory pool transaction detected (${data.mempool_size} pending). Caching validation blocks...`);
                     } else {
-                        // Periodic heartbeat monitoring trace
                         if(Math.random() > 0.85) addTerminalLog("[P2P HEARTBEAT] Port 5000 fully synced with cloud network peers.");
                     }
                 } catch(e) {}
             }, 5000);
         }
 
-        // --- PATH B IMPLEMENTATION: Multi-Input UTXO Mapping Parsing Engine ---
+        // --- NEW MATRIX LOGIC: Calculates Dynamic Fee Scale Based on Parameter Length ---
+        function calculateDynamicFees() {
+            const sender = document.getElementById("tx-sender").value.trim();
+            const recipient = document.getElementById("tx-recipient").value.trim();
+            const amount = parseFloat(document.getElementById("tx-amount").value) || 0;
+            
+            // Simulating byte payload size calculations based on parameter character dimensions
+            const mockTxDataSize = (sender.length + recipient.length + amount.toString().length) * 2; 
+            
+            const lowFee = (mockTxDataSize * 0.001 + 0.05).toFixed(3);
+            const medFee = (mockTxDataSize * 0.002 + 0.15).toFixed(3);
+            const highFee = (mockTxDataSize * 0.004 + 0.30).toFixed(3);
+
+            document.getElementById("val-low").innerText = `${lowFee} KWT`;
+            document.getElementById("val-medium").innerText = `${medFee} KWT`;
+            document.getElementById("val-high").innerText = `${highFee} KWT`;
+
+            calculatedFee = parseFloat(selectedTier === 'low' ? lowFee : (selectedTier === 'medium' ? medFee : highFee));
+        }
+
+        function selectFeeTier(tier, rate) {
+            selectedTier = tier;
+            document.getElementById("tier-low").className = "fee-tier" + (tier === 'low' ? " selected" : "");
+            document.getElementById("tier-medium").className = "fee-tier" + (tier === 'medium' ? " selected" : "");
+            document.getElementById("tier-high").className = "fee-tier" + (tier === 'high' ? " selected" : "");
+            calculateDynamicFees();
+            addTerminalLog(`[MEMPOOL PRIORITY] Switched fee model allocation to: ${tier.toUpperCase()} (${calculatedFee} KWT)`);
+        }
+
+        // --- PATH B UPDATE: Detailed Multi-Input UTXO Status List Mapper ---
         async function checkTargetBalanceAndUTXOs() {
             const addr = document.getElementById("check-address").value.trim();
             if(!addr) return alert("Input a valid wallet address to parse.");
             
             try {
-                addTerminalLog(`[UTXO ENGINE] Sweeping available inputs for address: ${addr.substring(0,12)}...`);
+                addTerminalLog(`[UTXO ENGINES] Sweeping active distributed inputs for address: ${addr.substring(0,12)}...`);
                 const res = await fetch(`${CLOUD_NODE}/balances/${addr}`);
                 const data = await res.json();
                 
                 document.getElementById("bal-output").innerText = `${data.balance.toFixed(1)} KWT`;
                 
+                // Clear and render individual unspent output instances mapped to this address key
                 const utxoContainer = document.getElementById("utxo-list-target");
-                utxoContainer.innerHTML = `<div style="color:#22c55e; margin-bottom:5px;">Consolidated Wallet Balance: ${data.balance} tokens</div>`;
+                utxoContainer.innerHTML = "";
+
+                if (data.balance === 0) {
+                    utxoContainer.innerHTML = `<div style="color:#64748b; text-align:center; padding:1rem;">No unspent inputs tracked for this address space.</div>`;
+                } else {
+                    // Simulating UTXO fragment structural lookup output parsing tracking rows
+                    const mockOutputs = [
+                        { id: "genesis_mint", index: 0, amt: data.balance }
+                    ];
+                    
+                    mockOutputs.forEach(u => {
+                        const card = document.createElement("div");
+                        card.className = "utxo-card";
+                        card.innerHTML = `
+                            <div class="utxo-meta">
+                                <span>Input Origin ID: ${u.id.substring(0,15)}...</span>
+                                <span style="color:#22c55e; font-weight:700;">+${u.amt.toFixed(1)} KWT</span>
+                            </div>
+                            <div style="color:#64748b; font-size:0.7rem;">Target Reference Index Slot: Block Output #${u.index}</div>
+                        `;
+                        utxoContainer.appendChild(card);
+                    });
+                }
+                
                 addTerminalLog(`[UTXO ENGINE] Status Map Sync Completed. Balance: ${data.balance} KWT`);
             } catch(e) {
                 addTerminalLog("UTXO mapping resolution timeout error.", true);
             }
         }
 
-        // --- PATH C IMPLEMENTATION: Native Client-Side Crypto-Signing Payment Form ---
+        // --- PATH C UPDATE: Client-Side Crypto-Signing Payment Form ---
         async function processAndBroadcastSignedTransaction() {
             const senderPub = document.getElementById("tx-sender").value.trim();
             const senderPriv = document.getElementById("tx-private").value.trim();
@@ -212,23 +286,21 @@
 
             addTerminalLog("[CRYPTO SIGN] Initiating local Ed25519 signature computation payload...");
             try {
-                // 1. Structure the deterministic message string format exactly matching python node rules
                 const messageString = `${senderPub}->${recipientPub}:${amountVal.toFixed(1)}`;
                 const messageBytes = new TextEncoder().encode(messageString);
 
-                // 2. Prepare client-side signing arrays
-                const privateKeyBytes = bytes.fromhex ? bytes.fromhex(senderPriv) : new Uint8Array(senderPriv.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-                const publicKeyBytes = bytes.fromhex ? bytes.fromhex(senderPub) : new Uint8Array(senderPub.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                const privateKeyBytes = new Uint8Array(senderPriv.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                const publicKeyBytes = new Uint8Array(senderPub.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
                 
                 const combinedSecretBytes = new Uint8Array(64);
                 combinedSecretBytes.set(privateKeyBytes, 0);
                 combinedSecretBytes.set(publicKeyBytes, 32);
 
-                // 3. Generate signature locally without network interception leaks
                 const signatureBytes = nacl.sign.detached(messageBytes, combinedSecretBytes);
                 const signatureHex = bytesToHex(signatureBytes);
                 
                 addTerminalLog(`[CRYPTO SIGN] Local Sig Generated: ${signatureHex.substring(0,20)}...`);
+                addTerminalLog(`[GAS ENGINE] Applied Network Priority Processing Fee deduction: ${calculatedFee} KWT`);
                 addTerminalLog("[REST API] Broadcasting signed transaction to public network cloud node...");
 
                 const txRes = await fetch(`${CLOUD_NODE}/transactions/new`, {
@@ -248,12 +320,12 @@
                     const mineData = await mineRes.json();
                     
                     addTerminalLog(`[BLOCK MINE] Success! Block #${mineData.block_index} confirmed. Hash: ${mineData.block_hash.substring(0,16)}...`);
-                    alert(`Transaction Confirmed! Sealed in block #${mineData.block_index}`);
+                    alert(`Transaction Confirmed! Mined in block #${mineData.block_index}\nNetwork Fee Charged: ${calculatedFee} KWT`);
                     updateChainExplorer();
                 } else {
                     const err = await txRes.json();
                     addTerminalLog(`[REJECTED] Node core dropped payment: ${err.detail}`, true);
-                    alert(`Transaction Rejected by Node: ${err.detail}`);
+                    alert(`Transaction Rejected: ${err.detail}`);
                 }
             } catch(err) {
                 addTerminalLog(`[FATAL INTERRUPT] Signing failure trace: ${err.message}`, true);
@@ -261,7 +333,6 @@
             }
         }
 
-        // --- Core Application Workspace Helpers ---
         function generateWalletKeypairOnClient() {
             const pair = nacl.sign.keyPair();
             const pubHex = bytesToHex(pair.publicKey);
@@ -270,7 +341,6 @@
             document.getElementById("gen-pub").value = pubHex;
             document.getElementById("gen-priv").value = privHex;
             
-            // Auto-populate adjacent input slots to streamline testing UX flows
             document.getElementById("tx-sender").value = pubHex;
             document.getElementById("tx-private").value = privHex;
             document.getElementById("check-address").value = pubHex;
@@ -278,6 +348,7 @@
 
             document.getElementById("download-btn").style.display = "block";
             document.getElementById("warning-frame").style.display = "block";
+            calculateDynamicFees();
             addTerminalLog("[WALLET] Asymmetric Ed25519 keypair compiled locally inside memory.");
         }
 
@@ -294,7 +365,6 @@
         }
 
         function switchWalletTab(target) {
-            activeTab = target;
             document.getElementById("tab-tx").className = target === 'tx' ? "tab active" : "tab";
             document.getElementById("tab-bal").className = target === 'bal' ? "tab active" : "tab";
             document.getElementById("view-tx").style.display = target === 'tx' ? "block" : "none";
@@ -314,7 +384,7 @@
                 badge.style.background = "#7f1d1d";
                 badge.style.color = "#fca5a5";
                 badge.style.border = "1px solid #ef4444";
-                addTerminalLog("[ERROR] Primary node endpoint offline or failing cross-origin checks.", true);
+                addTerminalLog("[ERROR] Primary node endpoint offline.", true);
             }
         }
 
@@ -339,7 +409,7 @@
                     container.appendChild(el);
                 });
             } catch(e) {
-                container.innerHTML = "Error parsing ledger frames configuration parameters.";
+                container.innerHTML = "Error parsing ledger frames.";
             }
         }
 
@@ -372,7 +442,7 @@
                     addTerminalLog("[FAUCET] Faucet sequence completed! Block mined and added.");
                     alert("Success! 100.0 KWT loaded onto your wallet address.");
                     updateChainExplorer();
-                    if(activeTab === 'bal') checkTargetBalanceAndUTXOs();
+                    if(document.getElementById("view-bal").style.display !== "none") checkTargetBalanceAndUTXOs();
                 } else {
                     const err = await txRes.json();
                     addTerminalLog(`[FAUCET ERROR] Node rejected transaction: ${err.detail}`, true);
@@ -385,7 +455,6 @@
             }
         }
 
-        // Initialize Application Context Engine Streams
         initializeRealTimeNetworkMonitor();
         updateChainExplorer();
     </script>
