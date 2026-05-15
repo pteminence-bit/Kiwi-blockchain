@@ -80,11 +80,7 @@ def verify_ed25519_signature(public_key_hex: str, message: str, signature_hex: s
     try:
         public_key_bytes = bytes.fromhex(public_key_hex)
         signature_bytes = bytes.fromhex(signature_hex)
-        
-        # Load the raw public key into the cryptography object engine
         public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
-        
-        # Verify the message bytes
         public_key.verify(signature_bytes, message.encode())
         return True
     except (ValueError, InvalidSignature, TypeError):
@@ -112,21 +108,6 @@ class Transaction:
     def compute_tx_id(self) -> str:
         tx_data = {"inputs": self.inputs, "outputs": [out.to_dict() for out in self.outputs], "sender": self.sender_pub_key}
         return hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
-
-    def is_valid(self, utxo_pool: dict) -> bool:
-        if not self.inputs:
-            return True
-        msg_to_verify = f"{self.inputs}->{[out.to_dict() for out in self.outputs]}"
-        if not verify_ed25519_signature(self.sender_pub_key, msg_to_verify, self.signature):
-            return False
-        input_total = 0.0
-        for tx_in in self.inputs:
-            utxo_key = f"{tx_in['tx_id']}:{tx_in['index']}"
-            if utxo_key not in utxo_pool:
-                return False
-            input_total += utxo_pool[utxo_key].amount
-        output_total = sum(out.amount for out in self.outputs)
-        return input_total >= output_total
 
 class Block:
     def __init__(self, index: int, transactions: list, previous_hash: str, nonce: int = 0):
@@ -244,13 +225,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Kiwi Blockchain Node Engine", lifespan=lifespan)
 
 class TransactionPayload(BaseModel):
-    sender: str          # Must be a valid 64-character Ed25519 Public Key hex
-    recipient: str       # Must be a valid 64-character Ed25519 Public Key hex
+    sender: str
+    recipient: str
     amount: float
-    signature: str       # 128-character cryptographic signature hex
+    signature: str
 
 class WalletSignPayload(BaseModel):
-    private_key: str     # 64-character Private Key hex string
+    private_key: str
     message: str
 
 @app.get("/chain")
@@ -298,7 +279,6 @@ def sign_transaction_data(payload: WalletSignPayload):
     try:
         private_bytes = bytes.fromhex(payload.private_key)
         private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_bytes)
-        
         signature = private_key.sign(payload.message.encode())
         return {"message_string": payload.message, "signature": signature.hex()}
     except Exception as e:
@@ -311,8 +291,8 @@ def add_transaction(payload: TransactionPayload):
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
-    # 2. Re-create the deterministic message string that was signed
-    msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount}"
+    # 2. Standardize float presentation to prevent trailing zero dropping issues
+    msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount:.1f}"
     
     # 3. Perform real Ed25519 cryptographic validation check
     if not verify_ed25519_signature(payload.sender, msg_to_verify, payload.signature):
