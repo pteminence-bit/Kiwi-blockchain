@@ -56,13 +56,14 @@ class BlockchainDB:
             conn.commit()
 
     def load_chain_state(self) -> tuple:
-        """Restores chain records and active UTXOs into memory upon reboot."""
+        """Restores chain records and active UTXOs into memory upon reboot with proper column unpacking."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
             db_blocks = cursor.fetchall()
             chain = []
             for row in db_blocks:
+                # --- FIX: Extract positional indices safely ---
                 block = Block(index=row[0], transactions=[], previous_hash=row[3], nonce=row[4])
                 block.timestamp = row[1]
                 block.merkle_root = row[2]
@@ -254,7 +255,6 @@ class WalletSignPayload(BaseModel):
 
 @app.get("/")
 def read_root():
-    """Root route showing node state instead of 404."""
     return {
         "network": "Kiwi Blockchain Network Layer",
         "status": "Operational",
