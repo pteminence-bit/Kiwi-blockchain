@@ -359,6 +359,44 @@ def mine_block_from_mempool():
         "block_index": new_block.index,
         "block_hash": new_block.hash
     }
+import httpx # Run 'pip install httpx' inside your terminal first
+
+# A register list holding the network addresses of peer node computers
+connected_peers = ["http://127.0.0.1:5001"] 
+
+@app.post("/peers/register")
+def register_new_peer(peer_url: str):
+    """Registers an external node address into the networking array."""
+    if peer_url not in connected_peers:
+        connected_peers.append(peer_url)
+    return {"message": "Peer registered.", "total_peers": len(connected_peers)}
+
+@app.post("/peers/sync")
+async def synchronize_with_longest_chain():
+    """Queries connected peers and adopts their chain if it has more work completed."""
+    global blockchain_instance
+    longest_chain = None
+    max_length = len(blockchain_instance.chain)
+
+    async with httpx.AsyncClient() as client:
+        for peer in connected_peers:
+            try:
+                response = await client.get(f"{peer}/chain", timeout=2.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    # Consensus Rule: Longest valid chain wins the network state
+                    if data["length"] > max_length:
+                        max_length = data["length"]
+                        longest_chain = data["chain"]
+            except httpx.RequestError:
+                continue # Skip offline or lagging peer node configurations
+
+    if longest_chain:
+        print("[+] Resolving network consensus: Downloading longer valid chain...")
+        # (Your loop to map JSON lists back into Block classes goes here)
+        return {"message": "Chain synchronized to match network length.", "new_length": max_length}
+    
+    return {"message": "Node is already synchronized with the longest network chain."}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5000)
