@@ -30,8 +30,8 @@ class Transaction:
     def __init__(self, inputs: list, outputs: list, senders: list, signatures: list, fee: float):
         self.inputs = inputs
         self.outputs = outputs
-        self.senders = senders          # List of authorized multi-sig public keys
-        self.signatures = signatures    # List of generated signature hex keys
+        self.senders = senders          
+        self.signatures = signatures    
         self.fee = fee
         self.tx_id = self.compute_tx_id()
 
@@ -246,10 +246,10 @@ app.add_middleware(
 )
 
 class TransactionPayload(BaseModel):
-    senders: list        # Expects array of public keys for multi-sig validation
+    senders: list        
     recipient: str
     amount: float
-    signatures: list     # Expects matching cryptographic signature array strings
+    signatures: list     
     fee: float
 
 class WalletSignPayload(BaseModel):
@@ -311,47 +311,44 @@ def sign_transaction_data(payload: WalletSignPayload):
 
 @app.post("/transactions/new")
 def add_transaction(payload: TransactionPayload):
-    # --- FIX: Safe string extract from incoming arrays to fix balance lookup crashes ---
-    primary_sender = payload.senders[0] if isinstance(payload.senders, list) and payload.senders else str(payload.senders)
-    
+    if not payload.senders:
+        raise HTTPException(status_code=400, detail="Transaction requires at least one sender address.")
+        
+    # --- SANITIZATION FIX: Safely cast sender reference as a pure string sequence ---
+    primary_sender = str(payload.senders[0])
+
     if not blockchain_instance.utxo_pool:
         initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=primary_sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
-    # 1. ENFORCE ANTI-SPAM GAS FEES
     payload_size_bytes = len(json.dumps(payload.dict()))
     min_required_fee = (payload_size_bytes * 0.0005) + 0.02
     if payload.fee < min_required_fee:
-        raise HTTPException(status_code=402, detail=f"Insufficient transaction fee. Minimum required: {min_required_fee:.3f} KWT.")
+        raise HTTPException(status_code=402, detail=f"Insufficient fee. Min required: {min_required_fee:.3f} KWT.")
 
-    # 2. MULTI-SIG THRESHOLD APPROVAL ENGINE
-    senders_list = payload.senders if isinstance(payload.senders, list) else [payload.senders]
-    required_signatures_count = max(1, len(senders_list) // 2 + (len(senders_list) % 2 > 0))
+    required_signatures_count = max(1, len(payload.senders) // 2 + (len(payload.senders) % 2 > 0))
     if len(payload.signatures) < required_signatures_count:
-        raise HTTPException(status_code=403, detail=f"Multi-Sig Failure: Transaction requires at least {required_signatures_count} valid key approvals.")
+        raise HTTPException(status_code=403, detail=f"Multi-Sig Failure: Requires {required_signatures_count} approvals.")
 
-    # Construct serialization message context
     msg_to_verify = f"{primary_sender}->{payload.recipient}:{payload.amount:.1f}"
     
-    # Authenticate signature keys
     valid_sig_matches = 0
-    for pub_key in senders_list:
+    for pub_key in payload.senders:
         for signature in payload.signatures:
             if verify_ed25519_signature(pub_key, msg_to_verify, signature):
                 valid_sig_matches += 1
                 break
 
     if valid_sig_matches < required_signatures_count:
-        raise HTTPException(status_code=401, detail="Cryptographic authorization failed. Unique signatures map is invalid.")
+        raise HTTPException(status_code=401, detail="Cryptographic authorization failed.")
 
-    # 3. UTXO AVAILABILITY VERIFICATION
     current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == primary_sender)
     total_cost = payload.amount + payload.fee
     if current_bal < total_cost:
-        raise HTTPException(status_code=400, detail=f"Insufficient balance to cover trade amount and network execution fees. Cost: {total_cost} KWT.")
+        raise HTTPException(status_code=400, detail=f"Insufficient balance. Cost: {total_cost} KWT.")
 
     mempool.append(payload.dict())
-    return {"message": "Gas fees and Multi-Sig threshold rules cleared! Transaction safely cued.", "pending_transactions_count": len(mempool)}
+    return {"message": "Transaction pooled successfully.", "pending_transactions_count": len(mempool)}
 
 @app.post("/mine")
 def mine_block_from_mempool():
@@ -367,7 +364,7 @@ def mine_block_from_mempool():
         signatures = tx_data["signatures"]
         fee = tx_data["fee"]
 
-        primary_sender = senders[0] if isinstance(senders, list) and senders else str(senders)
+        primary_sender = str(senders[0])
         source_tx_id = "genesis_mint"
         source_index = 0
         for key, utxo in blockchain_instance.utxo_pool.items():
@@ -379,7 +376,6 @@ def mine_block_from_mempool():
         current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == primary_sender)
         tx_input = {"tx_id": source_tx_id, "index": source_index}
         tx_output = UTXO(tx_id=f"tx_{int(time.time())}", output_index=0, recipient=recipient, amount=amount)
-        
         tx_change = UTXO(tx_id=f"tx_{int(time.time())}", output_index=1, recipient=primary_sender, amount=current_bal - amount - fee)
 
         secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], senders=senders, signatures=signatures, fee=fee)
@@ -394,7 +390,7 @@ def mine_block_from_mempool():
         raise HTTPException(status_code=500, detail="Database commitment failure.")
 
     mempool = []
-    return {"message": "Block mined successfully under multi-sig parameter enforcement rules!", "block_index": new_block.index, "block_hash": new_block.hash}
+    return {"message": "Block mined successfully!", "block_index": new_block.index, "block_hash": new_block.hash}
 
 if __name__ == "__main__":
     target_port = 5000
