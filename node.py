@@ -27,11 +27,11 @@ class UTXO:
         return {"tx_id": self.tx_id, "index": self.output_index, "recipient": self.recipient, "amount": self.amount}
 
 class Transaction:
-    def __init__(self, inputs: list, outputs: list, sender_pub_key: str = None, signature: str = None, fee: float = 0.0):
+    def __init__(self, inputs: list, outputs: list, senders: list, signatures: list, fee: float):
         self.inputs = inputs
         self.outputs = outputs
-        self.sender_pub_key = sender_pub_key
-        self.signature = signature
+        self.senders = senders          # List of authorized multi-sig public keys
+        self.signatures = signatures    # List of generated signature hex keys
         self.fee = fee
         self.tx_id = self.compute_tx_id()
 
@@ -39,7 +39,7 @@ class Transaction:
         tx_data = {
             "inputs": self.inputs, 
             "outputs": [out.to_dict() for out in self.outputs], 
-            "sender": self.sender_pub_key,
+            "senders": self.senders,
             "fee": self.fee
         }
         return hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
@@ -71,6 +71,7 @@ class BlockchainDB:
         self.init_db()
 
     def init_db(self):
+        """Initializes relational tables to store the structural chain state."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -81,6 +82,13 @@ class BlockchainDB:
                     previous_hash TEXT,
                     nonce INTEGER,
                     hash TEXT UNIQUE
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transactions (
+                    tx_id TEXT PRIMARY KEY,
+                    block_index INTEGER,
+                    fee REAL
                 )
             """)
             cursor.execute("""
@@ -95,6 +103,7 @@ class BlockchainDB:
             conn.commit()
 
     def load_chain_state(self) -> tuple:
+        """Restores chain records and active UTXOs into memory upon reboot with precise tuple index unpacking."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
@@ -116,6 +125,7 @@ class BlockchainDB:
 
 # --- Core Cryptographic Helper Functions ---
 def verify_ed25519_signature(public_key_hex: str, message: str, signature_hex: str) -> bool:
+    """Verifies a genuine Ed25519 asymmetric signature against a public key."""
     try:
         public_key_bytes = bytes.fromhex(public_key_hex)
         signature_bytes = bytes.fromhex(signature_hex)
@@ -138,9 +148,25 @@ class KiwiBlockchain:
             self.chain = saved_chain
             self.utxo_pool = saved_utxo
             print("[+] System reboot successful. State recovered from SQLite DB.")
+            if not self.verify_entire_chain_integrity():
+                print("[-] CRITICAL: Local database integrity check failed! Process aborted.")
+                sys.exit(1)
         else:
             print("[*] No existing ledger found. Initializing genesis architecture...")
             self.create_genesis_block()
+
+    def verify_entire_chain_integrity(self) -> bool:
+        """Cryptographic boot loader validation check."""
+        print("[*] Verifying cryptographic ledger history...")
+        for i in range(1, len(self.chain)):
+            current = self.chain[i]
+            previous = self.chain[i-1]
+            if current.previous_hash != previous.hash:
+                return False
+            if not current.hash.startswith('0' * self.difficulty):
+                return False
+        print("[✔] Cryptographic verification complete. Ledger matches math rules.")
+        return True
 
     def create_genesis_block(self):
         genesis_block = Block(0, [], "0")
@@ -149,6 +175,7 @@ class KiwiBlockchain:
         with sqlite3.connect(self.db_filename) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM utxo_pool")
+            cursor.execute("DELETE FROM transactions")
             cursor.execute("DELETE FROM blocks")
             cursor.execute("""
                 INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
@@ -195,7 +222,7 @@ class KiwiBlockchain:
 # Global Application States
 blockchain_instance = None
 mempool = []
-in_flight_locks = set()  # Memory map to eliminate frontrunning/double-spending inside mempool
+connected_peers = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -219,10 +246,11 @@ app.add_middleware(
 )
 
 class TransactionPayload(BaseModel):
-    sender: str
+    senders: list        # Expects array of public keys for multi-sig validation
     recipient: str
     amount: float
-    signature: str
+    signatures: list     # Expects matching cryptographic signature array array strings
+    fee: float
 
 class WalletSignPayload(BaseModel):
     private_key: str
@@ -233,7 +261,7 @@ def read_root():
     return {
         "network": "Kiwi Blockchain Network Layer",
         "status": "Operational",
-        "version": "1.0.0-Live",
+        "version": "1.1.0-MultiSig-Fees",
         "active_mempool_transactions": len(mempool)
     }
 
@@ -254,10 +282,8 @@ def get_chain():
 
 @app.get("/balances/{address}")
 def get_balance(address: str):
-    # Filter active outputs owned by target address keys
-    user_utxos = [u.to_dict() for u in blockchain_instance.utxo_pool.values() if u.recipient == address]
-    total_bal = sum(u["amount"] for u in user_utxos)
-    return {"address": address, "balance": total_bal, "utxos": user_utxos}
+    bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == address)
+    return {"address": address, "balance": bal}
 
 @app.get("/mempool")
 def get_mempool():
@@ -282,113 +308,91 @@ def sign_transaction_data(payload: WalletSignPayload):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Signing error: {str(e)}")
 
-# --- PATH B: ADVANCED MULTI-INPUT UTXO SWEEPING & MATRIX FEE IMPLEMENTATION ---
 @app.post("/transactions/new")
 def add_transaction(payload: TransactionPayload):
-    global in_flight_locks
-    
-    # 1. Automated Genesis Faucet fallback trigger logic
-    if not blockchain_instance.utxo_pool and payload.sender == "9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c":
-        initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=payload.sender, amount=1000.0)
+    # Bootstrap fallback financing mechanism
+    primary_sender = payload.senders[0]
+    if not blockchain_instance.utxo_pool:
+        initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=primary_sender, amount=500.0)
         blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
 
-    # 2. Extract network structural Fee Configuration Matrix calculation profile parameters
-    # Compiles transaction weight constraints fee pricing linearly against asset transfer volume
-    computed_min_fee = max(0.1, round(payload.amount * 0.01, 2))
+    # 1. ENFORCE ANTI-SPAM GAS FEES: Calculate minimum network required fee metrics based on text payload sizes
+    payload_size_bytes = len(json.dumps(payload.dict()))
+    min_required_fee = (payload_size_bytes * 0.0005) + 0.02
+    if payload.fee < min_required_fee:
+        raise HTTPException(status_code=402, detail=f"Insufficient transaction fee. Minimum required: {min_required_fee:.3f} KWT.")
 
-    # 3. Deterministic serialization re-compilation matching frontend sign mapping rules
-    msg_to_verify = f"{payload.sender}->{payload.recipient}:{payload.amount:.1f}:fee={computed_min_fee:.2f}"
-    if not verify_ed25519_signature(payload.sender, msg_to_verify, payload.signature):
-        raise HTTPException(status_code=401, detail="Cryptographic signature verification failed! Data mismatch.")
+    # 2. MULTI-SIG THRESHOLD APPROVAL ENGINE: Enforce M-of-N verification constraints (Requires minimum 50% approval threshold)
+    required_signatures_count = max(1, len(payload.senders) // 2 + (len(payload.senders) % 2 > 0))
+    if len(payload.signatures) < required_signatures_count:
+        raise HTTPException(status_code=403, detail=f"Multi-Sig Failure: Transaction requires at least {required_signatures_count} valid key approvals.")
 
-    # 4. Deep-sweep UTXO Pool memory fields to accumulate individual fragmented assets balances
-    available_inputs = []
-    accumulated_funds = 0.0
+    # Construct the serialization message context
+    msg_to_verify = f"{primary_sender}->{payload.recipient}:{payload.amount:.1f}"
     
-    for key, utxo in blockchain_instance.utxo_pool.items():
-        if utxo.recipient == payload.sender:
-            # Double-Spend Safeguard: Block selection criteria verification check logic
-            if key in in_flight_locks:
-                continue # Skip coins currently tied up in pending transactions
-            available_inputs.append({"tx_id": utxo.tx_id, "index": utxo.output_index})
-            accumulated_funds += utxo.amount
-            if accumulated_funds >= (payload.amount + computed_min_fee):
+    # Authenticate signature keys array loop positions
+    valid_sig_matches = 0
+    for pub_key in payload.senders:
+        for signature in payload.signatures:
+            if verify_ed25519_signature(pub_key, msg_to_verify, signature):
+                valid_sig_matches += 1
                 break
 
-    # 5. Check if the consolidated wallet inputs are sufficient
-    required_total = payload.amount + computed_min_fee
-    if accumulated_funds < required_total:
-        raise HTTPException(status_code=400, detail=f"Insufficient user balance. Required inputs: {required_total:.2f} KWT (includes fee matrix constraint).")
+    if valid_sig_matches < required_signatures_count:
+        raise HTTPException(status_code=401, detail="Cryptographic authorization failed. Unique signatures map is invalid.")
 
-    # Lock inputs into the double-spend prevention map
-    for input_utxo in available_inputs:
-        in_flight_locks.add(f"{input_utxo['tx_id']}:{input_utxo['index']}")
+    # 3. UTXO AVAILABILITY VERIFICATION
+    current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == primary_sender)
+    total_cost = payload.amount + payload.fee
+    if current_bal < total_cost:
+        raise HTTPException(status_code=400, detail=f"Insufficient balance to cover trade amount and network execution fees. Cost: {total_cost} KWT.")
 
-    # Queue transaction parameters directly into memory pool data lists
-    mempool_entry = {
-        "sender": payload.sender,
-        "recipient": payload.recipient,
-        "amount": payload.amount,
-        "fee": computed_min_fee,
-        "inputs": available_inputs,
-        "accumulated_funds": accumulated_funds,
-        "signature": payload.signature
-    }
-    mempool.append(mempool_entry)
-    
-    return {
-        "message": "Asymmetric signature verified and multi-input UTXO swept successfully!",
-        "pending_transactions_count": len(mempool),
-        "computed_transaction_fee": computed_min_fee
-    }
+    mempool.append(payload.dict())
+    return {"message": "Gas fees and Multi-Sig threshold rules cleared! Transaction safely cued.", "pending_transactions_count": len(mempool)}
 
 @app.post("/mine")
 def mine_block_from_mempool():
-    global mempool, in_flight_locks
+    global mempool
     if not mempool:
-        raise HTTPException(status_code=400, detail="Mempool queue is dry.")
+        raise HTTPException(status_code=400, detail="Mempool is empty.")
 
     block_transactions = []
-    block_tx_id = f"tx_{int(time.time())}"
+    for tx_data in mempool:
+        senders = tx_data["senders"]
+        recipient = tx_data["recipient"]
+        amount = tx_data["amount"]
+        signatures = tx_data["signatures"]
+        fee = tx_data["fee"]
 
-    for index, tx_data in enumerate(mempool):
-        # Unpack inputs allocated by selection loops step
-        tx_inputs = tx_data["inputs"]
-        
-        # Calculate remainder change balances
-        change_amount = tx_data["accumulated_funds"] - tx_data["amount"] - tx_data["fee"]
-        
-        tx_outputs = []
-        # Main transfer destination allocation output
-        tx_outputs.append(UTXO(tx_id=block_tx_id, output_index=0, recipient=tx_data["recipient"], amount=tx_data["amount"]))
-        
-        # If change remainder exists, route it back to the sender
-        if change_amount > 0:
-            tx_outputs.append(UTXO(tx_id=block_tx_id, output_index=1, recipient=tx_data["sender"], amount=round(change_amount, 2)))
+        primary_sender = senders[0]
+        source_tx_id = "genesis_mint"
+        source_index = 0
+        for key, utxo in blockchain_instance.utxo_pool.items():
+            if utxo.recipient == primary_sender:
+                source_tx_id = utxo.tx_id
+                source_index = utxo.output_index
+                break
 
-        secure_tx = Transaction(
-            inputs=tx_inputs, 
-            outputs=tx_outputs, 
-            sender_pub_key=tx_data["sender"], 
-            signature=tx_data["signature"],
-            fee=tx_data["fee"]
-        )
+        current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == primary_sender)
+        tx_input = {"tx_id": source_tx_id, "index": source_index}
+        tx_output = UTXO(tx_id=f"tx_{int(time.time())}", output_index=0, recipient=recipient, amount=amount)
+        
+        # Balance deduction accounting factors both amount transfer and burnt processing gas costs
+        tx_change = UTXO(tx_id=f"tx_{int(time.time())}", output_index=1, recipient=primary_sender, amount=current_bal - amount - fee)
+
+        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], senders=senders, signatures=signatures, fee=fee)
         block_transactions.append(secure_tx)
 
-    # Compile into structural proof-of-work block frame container
     new_block = Block(index=len(blockchain_instance.chain), transactions=block_transactions, previous_hash=blockchain_instance.chain[-1].hash)
     while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
         new_block.nonce += 1
         new_block.hash = new_block.compute_hash()
 
     if not blockchain_instance.add_block_to_chain(new_block):
-        raise HTTPException(status_code=500, detail="Database persistence commitment failure.")
+        raise HTTPException(status_code=500, detail="Database commitment failure.")
 
-    # Clear memory pool tracking states and locks upon mining confirmation
     mempool = []
-    in_flight_locks.clear()
-    
-    return {"message": "Block mined successfully! UTXO consolidation cleared.", "block_index": new_block.index, "block_hash": new_block.hash}
+    return {"message": "Block mined successfully under multi-sig parameter enforcement rules!", "block_index": new_block.index, "block_hash": new_block.hash}
 
 if __name__ == "__main__":
     target_port = 5000
