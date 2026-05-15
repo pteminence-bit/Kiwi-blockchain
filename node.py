@@ -383,7 +383,7 @@ async def synchronize_with_longest_chain():
     
     return {"message": "Node already up to date with network."}
 
- if __name__ == "__main__":
+if __name__ == "__main__":
     target_port = 5000
     for i, arg in enumerate(sys.argv):
         if arg == "--port" and i + 1 < len(sys.argv):
