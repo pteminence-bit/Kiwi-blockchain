@@ -4,26 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kiwi Mainnet Hub</title>
-    // --- REPLACE THE CRASHING COLD-START INITS AT THE BOTTOM ---
-async function startWebPortalSecurely() {
-    try {
-        // Run health diagnostics asynchronously to stop blocking the main layout thread
-        verifyNodeHealth();
-        
-        // Defer block explorer loading so the web view can render instantly
-        setTimeout(() => {
-            updateChainExplorer();
-            initializeRealTimeNetworkMonitor();
-        }, 300);
-        
-    } catch(e) {
-        addTerminalLog("Deferred startup routine bypass initialization event.", true);
-    }
-}
-
-// Fire the non-blocking execution thread wrapper
-startWebPortalSecurely();
-
     <!-- Stable cryptographic primitives for client-side Ed25519 signing -->
     <script src="https://jsdelivr.net"></script>
     <style>
@@ -478,5 +458,25 @@ startWebPortalSecurely();
         initializeRealTimeNetworkMonitor();
         updateChainExplorer();
     </script>
+    // --- REPLACE THE CRASHING COLD-START INITS AT THE BOTTOM ---
+async function startWebPortalSecurely() {
+    try {
+        // Run health diagnostics asynchronously to stop blocking the main layout thread
+        verifyNodeHealth();
+        
+        // Defer block explorer loading so the web view can render instantly
+        setTimeout(() => {
+            updateChainExplorer();
+            initializeRealTimeNetworkMonitor();
+        }, 300);
+        
+    } catch(e) {
+        addTerminalLog("Deferred startup routine bypass initialization event.", true);
+    }
+}
+
+// Fire the non-blocking execution thread wrapper
+startWebPortalSecurely();
+
 </body>
 </html>
