@@ -15,81 +15,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.exceptions import InvalidSignature
 
-# --- Database Persistence Layer ---
-class BlockchainDB:
-    def __init__(self, db_path: str = "kiwi_ledger.db"):
-        self.db_path = db_path
-        self.init_db()
-
-    def init_db(self):
-        """Initializes relational tables to store the structural chain state."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS blocks (
-                    id_index INTEGER PRIMARY KEY,
-                    timestamp REAL,
-                    merkle_root TEXT,
-                    previous_hash TEXT,
-                    nonce INTEGER,
-                    hash TEXT UNIQUE
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS transactions (
-                    tx_id TEXT PRIMARY KEY,
-                    block_index INTEGER,
-                    sender_pub_key TEXT,
-                    signature TEXT,
-                    FOREIGN KEY(block_index) REFERENCES blocks(id_index)
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS utxo_pool (
-                    utxo_key TEXT PRIMARY KEY,
-                    tx_id TEXT,
-                    output_index INTEGER,
-                    recipient TEXT,
-                    amount REAL
-                )
-            """)
-            conn.commit()
-
-    def load_chain_state(self) -> tuple:
-        """Restores chain records and active UTXOs into memory upon reboot with proper column unpacking."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
-            db_blocks = cursor.fetchall()
-            chain = []
-            for row in db_blocks:
-                # --- FIX: Extract positional indices safely ---
-                block = Block(index=row[0], transactions=[], previous_hash=row[3], nonce=row[4])
-                block.timestamp = row[1]
-                block.merkle_root = row[2]
-                block.hash = row[5]
-                chain.append(block)
-
-            cursor.execute("SELECT utxo_key, tx_id, output_index, recipient, amount FROM utxo_pool")
-            db_utxos = cursor.fetchall()
-            utxo_pool = {}
-            for row in db_utxos:
-                utxo_pool[row[0]] = UTXO(tx_id=row[1], output_index=row[2], recipient=row[3], amount=row[4])
-            return chain, utxo_pool
-
-# --- Core Cryptographic Helper Functions ---
-def verify_ed25519_signature(public_key_hex: str, message: str, signature_hex: str) -> bool:
-    """Verifies a genuine Ed25519 asymmetric signature against a public key."""
-    try:
-        public_key_bytes = bytes.fromhex(public_key_hex)
-        signature_bytes = bytes.fromhex(signature_hex)
-        public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
-        public_key.verify(signature_bytes, message.encode())
-        return True
-    except (ValueError, InvalidSignature, TypeError):
-        return False
-
-# --- Core Logic with Database Anchors ---
+# --- Core Logic Framework Objects (Moved Top for Compiler Ordering) ---
 class UTXO:
     def __init__(self, tx_id: str, output_index: int, recipient: str, amount: float):
         self.tx_id = tx_id
@@ -131,6 +57,80 @@ class Block:
     def compute_hash(self) -> str:
         block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
         return hashlib.sha256(json.dumps(block_header, sort_keys=True).encode()).hexdigest()
+
+# --- Database Persistence Layer ---
+class BlockchainDB:
+    def __init__(self, db_path: str = "kiwi_ledger.db"):
+        self.db_path = db_path
+        self.init_db()
+
+    def init_db(self):
+        """Initializes relational tables to store the structural chain state."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS blocks (
+                    id_index INTEGER PRIMARY KEY,
+                    timestamp REAL,
+                    merkle_root TEXT,
+                    previous_hash TEXT,
+                    nonce INTEGER,
+                    hash TEXT UNIQUE
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transactions (
+                    tx_id TEXT PRIMARY KEY,
+                    block_index INTEGER,
+                    sender_pub_key TEXT,
+                    signature TEXT,
+                    FOREIGN KEY(block_index) REFERENCES blocks(id_index)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS utxo_pool (
+                    utxo_key TEXT PRIMARY KEY,
+                    tx_id TEXT,
+                    output_index INTEGER,
+                    recipient TEXT,
+                    amount REAL
+                )
+            """)
+            conn.commit()
+
+    def load_chain_state(self) -> tuple:
+        """Restores chain records and active UTXOs into memory upon reboot with full tuple column unpacking."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
+            db_blocks = cursor.fetchall()
+            chain = []
+            for row in db_blocks:
+                # --- FIX: Extract explicit positional elements from tuple array row ---
+                block = Block(index=row[0], transactions=[], previous_hash=row[3], nonce=row[4])
+                block.timestamp = row[1]
+                block.merkle_root = row[2]
+                block.hash = row[5]
+                chain.append(block)
+
+            cursor.execute("SELECT utxo_key, tx_id, output_index, recipient, amount FROM utxo_pool")
+            db_utxos = cursor.fetchall()
+            utxo_pool = {}
+            for row in db_utxos:
+                utxo_pool[row[0]] = UTXO(tx_id=row[1], output_index=row[2], recipient=row[3], amount=row[4])
+            return chain, utxo_pool
+
+# --- Core Cryptographic Helper Functions ---
+def verify_ed25519_signature(public_key_hex: str, message: str, signature_hex: str) -> bool:
+    """Verifies a genuine Ed25519 asymmetric signature against a public key."""
+    try:
+        public_key_bytes = bytes.fromhex(public_key_hex)
+        signature_bytes = bytes.fromhex(signature_hex)
+        public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
+        public_key.verify(signature_bytes, message.encode())
+        return True
+    except (ValueError, InvalidSignature, TypeError):
+        return False
 
 class KiwiBlockchain:
     def __init__(self, db_filename: str = "kiwi_ledger.db"):
@@ -234,7 +234,6 @@ async def lifespan(app: FastAPI):
 # --- API Specification Layer ---
 app = FastAPI(title="Kiwi Blockchain Node Engine", lifespan=lifespan)
 
-# Inject CORS configuration for mobile app connectivity
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
