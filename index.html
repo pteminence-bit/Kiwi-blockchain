@@ -4,17 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kiwi Ledger App</title>
+    <!-- Injecting secure client-side cryptographic primitives -->
+    <script src="https://jsdelivr.net"></script>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 2rem; }
-        .container { max-width: 1000px; margin: 0 auto; }
+        .container { max-width: 1100px; margin: 0 auto; }
         .nav { display: flex; justify-content: space-between; align-items: center; background: white; padding: 1.5rem 2rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 2rem; }
         h1 { margin: 0; color: #15803d; font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
         .status-badge { background: #dcfce7; color: #166534; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; }
-        .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; }
+        .grid { display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 2rem; }
         .card { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
         h2 { font-size: 1.125rem; margin-top: 0; color: #334155; margin-bottom: 1.25rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; }
-        .btn { background: #16a34a; color: white; border: none; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem; transition: background 0.2s; width: 100%; }
+        .btn { background: #16a34a; color: white; border: none; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem; transition: background 0.2s; width: 100%; margin-bottom: 0.5rem; }
         .btn:hover { background: #15803d; }
+        .btn-sec { background: #475569; }
+        .btn-sec:hover { background: #334155; }
         .input-group { margin-bottom: 1rem; }
         label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.375rem; color: #475569; }
         input { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.875rem; box-sizing: border-box; }
@@ -22,6 +26,7 @@
         .block-id { font-weight: bold; color: #1e293b; margin-bottom: 0.5rem; display: flex; justify-content: space-between; }
         .hash-box { font-family: monospace; background: #e2e8f0; padding: 0.375rem 0.5rem; border-radius: 4px; font-size: 0.75rem; color: #334155; overflow-x: auto; white-space: nowrap; margin-top: 0.25rem; }
         .bal-display { font-size: 1.75rem; font-weight: 700; color: #16a34a; text-align: center; margin: 1rem 0; }
+        .warning-text { font-size: 0.75rem; color: #b91c1c; font-weight: 500; background: #fef2f2; padding: 0.5rem; border-radius: 4px; border: 1px dashed #fca5a5; margin-top: 0.5rem; }
     </style>
 </head>
 <body>
@@ -37,14 +42,31 @@
                 <div class="card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
                         <h2 style="margin:0; border:none; padding:0;">📦 Confirmed Blockchain Ledger</h2>
-                        <button class="btn" style="width:auto; padding:0.4rem 1rem;" onclick="updateChainExplorer()">🔄 Refresh</button>
+                        <button class="btn" style="width:auto; padding:0.4rem 1rem; margin:0;" onclick="updateChainExplorer()">🔄 Refresh</button>
                     </div>
                     <div id="blocks-target">Querying live block data...</div>
                 </div>
             </div>
 
-            <!-- Right Side: Interaction Console Wallet & Faucet -->
+            <!-- Right Side: Interactivity Wallet Engine Panel -->
             <div>
+                <!-- NEW ADDITION: Client-Side Cryptographic Wallet Generator -->
+                <div class="card" style="border: 1px solid #16a34a;">
+                    <h2>🔑 Asymmetric Wallet Key Generator</h2>
+                    <button class="btn" style="background:#0284c7;" onclick="generateWalletKeypairOnClient()">⚡ Generate Fresh Ed25519 Keys</button>
+                    
+                    <div class="input-group" style="margin-top: 1rem;">
+                        <label>Generated Public Address (Safe to Share):</label>
+                        <input type="text" id="gen-pub" readonly placeholder="Click generate above">
+                    </div>
+                    <div class="input-group">
+                        <label>Generated Private Key (Secret Seed - DO NOT SHARE):</label>
+                        <input type="password" id="gen-priv" readonly placeholder="Click generate above">
+                    </div>
+                    <button class="btn btn-sec" id="download-btn" style="display:none;" onclick="downloadKeysBackupFile()">💾 Download Secret Key Backup File</button>
+                    <div class="warning-text" id="warning-frame" style="display:none;">⚠️ Keys are generated locally inside your browser memory cache. If you do not save the secret private key backup, your future token access assets are permanently unrecoverable.</div>
+                </div>
+
                 <div class="card">
                     <h2>💰 Quick Balance Check</h2>
                     <div class="input-group">
@@ -70,6 +92,45 @@
     <script>
         const CLOUD_NODE = "https://onrender.com";
 
+        // Converts byte arrays to hexadecimal strings safely
+        function bytesToHex(bytes) {
+            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // Native client-side Ed25519 Wallet generation routine
+        function generateWalletKeypairOnClient() {
+            // Generates cryptographically secure keys inside user browser memory context
+            const pair = nacl.sign.keyPair();
+            
+            // Extract the pure raw public and private secret keys arrays bytes representation
+            const pubHex = bytesToHex(pair.publicKey);
+            // nacl secret key array contains both private bytes and public bytes (64 bytes total), extract first 32 bytes
+            const privHex = bytesToHex(pair.secretKey.slice(0, 32));
+
+            document.getElementById("gen-pub").value = pubHex;
+            document.getElementById("gen-priv").value = privHex;
+            
+            // Auto-fill into check and faucet fields for seamless UX tracking tests
+            document.getElementById("check-address").value = pubHex;
+            document.getElementById("faucet-address").value = pubHex;
+
+            document.getElementById("download-btn").style.display = "block";
+            document.getElementById("warning-frame").style.display = "block";
+        }
+
+        function downloadKeysBackupFile() {
+            const pub = document.getElementById("gen-pub").value;
+            const priv = document.getElementById("gen-priv").value;
+            if(!pub || !priv) return;
+
+            const text = `=== KIWI BLOCKCHAIN NATIVE COIN WALLET BACKUP ===\nPublic Address: ${pub}\nPrivate Key:   ${priv}\n=================================================`;
+            const blob = new Blob([text], { type: "text/plain" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `kiwi_wallet_${pub.substring(0,8)}.txt`;
+            a.click();
+        }
+
         async function verifyNodeHealth() {
             try {
                 const res = await fetch(CLOUD_NODE);
@@ -78,8 +139,9 @@
                 }
             } catch {
                 document.getElementById("net-status").innerText = "Offline";
-                document.getElementById("net-status").style.background = "#fee2e2";
-                document.getElementById("net-status").style.color = "#991b1b";
+                const badge = document.getElementById("net-status");
+                badge.style.background = "#fee2e2";
+                badge.style.color = "#991b1b";
             }
         }
 
@@ -128,7 +190,6 @@
             btn.disabled = true;
 
             try {
-                // Generate secure transaction formatting matching Python API validation
                 const msg = `9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c->${addr}:100.0`;
                 const signRes = await fetch(`${CLOUD_NODE}/wallet/sign`, {
                     method: 'POST',
@@ -147,6 +208,7 @@
                     await fetch(`${CLOUD_NODE}/mine`, { method: 'POST' });
                     alert("Success! 100.0 KWT processed and blocks updated.");
                     updateChainExplorer();
+                    checkTargetBalance();
                 } else {
                     const err = await txRes.json();
                     alert(`Rejected: ${err.detail}`);
