@@ -15,7 +15,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.exceptions import InvalidSignature
 
-# --- Core Logic Framework Objects (Moved Top for Compiler Ordering) ---
+# --- Core Logic Framework Objects ---
 class UTXO:
     def __init__(self, tx_id: str, output_index: int, recipient: str, amount: float):
         self.tx_id = tx_id
@@ -99,14 +99,14 @@ class BlockchainDB:
             conn.commit()
 
     def load_chain_state(self) -> tuple:
-        """Restores chain records and active UTXOs into memory upon reboot with full tuple column unpacking."""
+        """Restores chain records and active UTXOs into memory upon reboot with precise tuple index tracking."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
             db_blocks = cursor.fetchall()
             chain = []
             for row in db_blocks:
-                # --- FIX: Extract explicit positional elements from tuple array row ---
+                # --- TO ALIGN WITH SELECT ORDER: id_index=0, timestamp=1, merkle_root=2, previous_hash=3, nonce=4, hash=5 ---
                 block = Block(index=row[0], transactions=[], previous_hash=row[3], nonce=row[4])
                 block.timestamp = row[1]
                 block.merkle_root = row[2]
@@ -117,6 +117,7 @@ class BlockchainDB:
             db_utxos = cursor.fetchall()
             utxo_pool = {}
             for row in db_utxos:
+                # --- TO ALIGN WITH SELECT ORDER: utxo_key=0, tx_id=1, output_index=2, recipient=3, amount=4 ---
                 utxo_pool[row[0]] = UTXO(tx_id=row[1], output_index=row[2], recipient=row[3], amount=row[4])
             return chain, utxo_pool
 
