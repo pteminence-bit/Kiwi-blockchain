@@ -178,7 +178,7 @@ class KiwiBlockchain:
             """, (genesis_block.index, genesis_block.timestamp, "empty", genesis_block.previous_hash, genesis_block.nonce, genesis_block.hash))
             conn.commit()
 
-       def add_block_to_chain(self, block: Block) -> bool:
+    def add_block_to_chain(self, block: Block) -> bool:
         if block.previous_hash != self.chain[-1].hash:
             return False
         backup_utxo_pool = self.utxo_pool.copy()
@@ -194,10 +194,7 @@ class KiwiBlockchain:
         try:
             with sqlite3.connect(self.db_filename) as conn:
                 cursor = conn.cursor()
-                
-                # --- FIX: Standardize Merkle Root array conversion to string ---
-                root_str = block.merkle_root[0] if isinstance(block.merkle_root, list) else block.merkle_root
-                
+                root_str = json.dumps(block.merkle_root) if isinstance(block.merkle_root, list) else block.merkle_root
                 cursor.execute("""
                     INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
                     VALUES (?, ?, ?, ?, ?, ?)
@@ -211,23 +208,20 @@ class KiwiBlockchain:
                     """, (key, utxo.tx_id, utxo.output_index, utxo.recipient, utxo.amount))
                 conn.commit()
         except sqlite3.Error as e:
-            # Print the exact database error to the console for tracking visibility
-            print(f"[-] SQLite Error: {e}")
+            print(f"[-] SQLite Insertion Error: {e}")
             self.utxo_pool = backup_utxo_pool
             self.chain.pop()
             return False
         return True
 
-
 # Global Application States
 blockchain_instance = None
 mempool = []
-connected_peers = []  # Internal P2P node tracking array
+connected_peers = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global blockchain_instance
-    # Determine local port from startup arguments to enable multi-node db partitioning
     port = 5000
     for i, arg in enumerate(sys.argv):
         if arg == "--port" and i + 1 < len(sys.argv):
@@ -348,17 +342,14 @@ def mine_block_from_mempool():
     mempool = []
     return {"message": "Block mined successfully!", "block_index": new_block.index, "block_hash": new_block.hash}
 
-# --- P2P Consensus Networking Layer Routes ---
 @app.post("/peers/register")
 def register_new_peer(peer_url: str):
-    """Registers an external network node address."""
     if peer_url not in connected_peers:
         connected_peers.append(peer_url)
     return {"message": "Peer successfully logged.", "total_peers": len(connected_peers)}
 
 @app.post("/peers/sync")
 async def synchronize_with_longest_chain():
-    """Queries connected peers and adopts their chain if it is longer and valid."""
     global blockchain_instance
     longest_chain = None
     max_length = len(blockchain_instance.chain)
@@ -369,7 +360,6 @@ async def synchronize_with_longest_chain():
                 response = await client.get(f"{peer}/chain", timeout=2.0)
                 if response.status_code == 200:
                     data = response.json()
-                    # Consensus: Longest chain with proper proof of work wins
                     if data["length"] > max_length:
                         max_length = data["length"]
                         longest_chain = data["chain"]
@@ -388,18 +378,14 @@ async def synchronize_with_longest_chain():
                 """, (b["index"], b["timestamp"], "tx_data", b["previous_hash"], b["nonce"], b["hash"]))
             conn.commit()
         
-        # Reload memory structures
         blockchain_instance.chain, blockchain_instance.utxo_pool = blockchain_instance.db.load_chain_state()
         return {"message": "Chain updated to match network length.", "new_length": max_length}
     
     return {"message": "Node already up to date with network."}
 
-if __name__ == "__main__":
-    # Standardize argument port lookup extraction
+ if __name__ == "__main__":
     target_port = 5000
     for i, arg in enumerate(sys.argv):
         if arg == "--port" and i + 1 < len(sys.argv):
             target_port = int(sys.argv[i+1])
-            
-    print(f"[*] Launching Uvicorn listener network engine on port: {target_port}")
     uvicorn.run(app, host="0.0.0.0", port=target_port)
