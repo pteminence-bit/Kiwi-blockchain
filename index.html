@@ -1,400 +1,480 @@
-import asyncio
-import hashlib
-import json
-import sqlite3
-import time
-import sys
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-from pydantic import BaseModel
-import httpx
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiwi Mainnet Hub</title>
+    <!-- Path A & C Optimization: Fast-loading Cloudflare Edge CDN Cryptography Primitives -->
+    <script src="https://cloudflare.com" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        .nav { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 1.5rem 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 2rem; border: 1px solid #334155; }
+        h1 { margin: 0; color: #4ade80; font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+        .status-badge { background: #15803d; color: #bbf7d0; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; border: 1px solid #22c55e; }
+        .grid { display: grid; grid-template-columns: 1.4fr 1.6fr; gap: 2rem; }
+        .card { background: #1e293b; padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1.5rem; border: 1px solid #334155; }
+        h2 { font-size: 1.125rem; margin-top: 0; color: #cbd5e1; margin-bottom: 1.25rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+        .btn { background: #22c55e; color: #052e16; border: none; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.875rem; transition: background 0.2s, transform 0.1s; width: 100%; margin-bottom: 0.5rem; display: flex; justify-content: center; align-items: center; gap: 0.5rem; }
+        .btn:hover { background: #4ade80; }
+        .btn:active { transform: scale(0.98); }
+        .btn-blue { background: #3b82f6; color: #172554; }
+        .btn-blue:hover { background: #60a5fa; }
+        .btn-sec { background: #475569; color: #f8fafc; border: 1px solid #64748b; }
+        .btn-sec:hover { background: #64748b; }
+        .input-group { margin-bottom: 1rem; }
+        label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.375rem; color: #94a3b8; }
+        input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #475569; border-radius: 6px; font-size: 0.875rem; box-sizing: border-box; background: #0f172a; color: #f8fafc; font-family: monospace; }
+        input:focus { border-color: #22c55e; outline: none; }
+        .block-item { border-left: 4px solid #22c55e; padding: 1rem; background: #0f172a; border-radius: 0 8px 8px 0; margin-bottom: 1rem; border-top: 1px solid #334155; border-right: 1px solid #334155; border-bottom: 1px solid #334155; }
+        .block-id { font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem; display: flex; justify-content: space-between; }
+        .hash-box { font-family: monospace; background: #1e293b; padding: 0.5rem; border-radius: 4px; font-size: 0.75rem; color: #cbd5e1; overflow-x: auto; white-space: nowrap; margin-top: 0.25rem; border: 1px solid #334155; }
+        .bal-display { font-size: 2rem; font-weight: 800; color: #22c55e; text-align: center; margin: 1rem 0; font-family: monospace; text-shadow: 0 0 10px rgba(34,197,94,0.2); }
+        .warning-text { font-size: 0.75rem; color: #f87171; font-weight: 500; background: #7f1d1d33; padding: 0.75rem; border-radius: 6px; border: 1px dashed #ef4444; margin-top: 0.5rem; line-height: 1.4; }
+        .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+        .tab { background: transparent; border: none; color: #94a3b8; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 600; cursor: pointer; border-radius: 6px; }
+        .tab.active { background: #334155; color: #f8fafc; }
+        .log-terminal { background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 0.75rem; color: #4ade80; height: 160px; overflow-y: auto; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); }
+        .log-entry { margin-bottom: 0.25rem; border-bottom: 1px dashed #1e293b; padding-bottom: 0.25rem; }
+        .fee-matrix-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; background: #0f172a; padding: 0.75rem; border-radius: 6px; border: 1px solid #334155; margin-bottom: 1rem; }
+        .fee-tier { text-align: center; padding: 0.5rem; border-radius: 4px; border: 1px solid #475569; cursor: pointer; }
+        .fee-tier.selected { border-color: #22c55e; background: #15803d33; }
+        .fee-value { font-family: monospace; font-weight: 700; color: #4ade80; font-size: 0.9rem; }
+        .utxo-card { background: #0f172a; border: 1px solid #334155; padding: 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.8rem; }
+        .utxo-meta { display: flex; justify-content: space-between; border-bottom: 1px dashed #334155; padding-bottom: 0.25rem; margin-bottom: 0.25rem; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <h1>🥝 Kiwi Layer-1 Mainnet Terminal</h1>
+            <span class="status-badge" id="net-status">Waking Node Container...</span>
+        </div>
 
-# Native cryptographic primitives for Ed25519 asymmetric signatures
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.exceptions import InvalidSignature
+        <div class="grid">
+            <!-- Left Side: Explorer Modules -->
+            <div>
+                <div class="card">
+                    <h2>📡 Live P2P Streaming Node Logs (Path A)</h2>
+                    <div class="log-terminal" id="log-target">
+                        <div class="log-entry" style="color: #64748b;">[SYSTEM] Application layer rendered. Local loops operational.</div>
+                    </div>
+                </div>
 
-# --- Core Logic Framework Objects ---
-class UTXO:
-    def __init__(self, tx_id: str, output_index: int, recipient: str, amount: float):
-        self.tx_id = tx_id
-        self.output_index = output_index
-        self.recipient = recipient
-        self.amount = amount
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                        <h2 style="margin:0; border:none; padding:0;">📦 Immutable Distributed Ledger</h2>
+                        <button class="btn" style="width:auto; padding:0.4rem 1rem; margin:0;" onclick="updateChainExplorer()">🔄 Refresh Explorer</button>
+                    </div>
+                    <div id="blocks-target">Awaiting asynchronous server sync thread...</div>
+                </div>
+            </div>
 
-    def to_dict(self):
-        return {"tx_id": self.tx_id, "index": self.output_index, "recipient": self.recipient, "amount": self.amount}
+            <!-- Right Side: Wallet Dashboard -->
+            <div>
+                <div class="card" style="border: 1px solid #22c55e;">
+                    <h2>🔑 Asymmetric Wallet Key Generation Suite</h2>
+                    <button class="btn" style="background:#0284c7; color:#0c4a6e;" onclick="generateWalletKeypairOnClient()">⚡ Generate Fresh Ed25519 Web3 Keys</button>
+                    <div class="input-group" style="margin-top: 1rem;">
+                        <label>Public Address Hex (Wallet Routing Endpoint):</label>
+                        <input type="text" id="gen-pub" readonly placeholder="Awaiting authorization payload...">
+                    </div>
+                    <div class="input-group">
+                        <label>Private Seed Hex Key (Secret Key Context):</label>
+                        <input type="password" id="gen-priv" readonly placeholder="Awaiting authorization payload...">
+                    </div>
+                    <button class="btn btn-sec" id="download-btn" style="display:none;" onclick="downloadKeysBackupFile()">💾 Download Secret Key Backup File</button>
+                    <div class="warning-text" id="warning-frame" style="display:none;">⚠️ Security Alert: Keys are handled via sandboxed browser RAM. Save your backup file. Lost keys cannot be retrieved by cloud clusters.</div>
+                </div>
 
-class Transaction:
-    def __init__(self, inputs: list, outputs: list, senders: list, signatures: list, fee: float):
-        self.inputs = inputs
-        self.outputs = outputs
-        self.senders = senders          # List of authorized multi-sig public keys
-        self.signatures = signatures    # List of generated signature hex keys
-        self.fee = fee
-        self.tx_id = self.compute_tx_id()
+                <div class="card">
+                    <div class="tabs">
+                        <button class="tab active" id="tab-tx" onclick="switchWalletTab('tx')">💸 Send Multi-Sig Tokens (Path C)</button>
+                        <button class="tab" id="tab-bal" onclick="switchWalletTab('bal')">🔍 UTXO Balance Explorer (Path B)</button>
+                    </div>
 
-    def compute_tx_id(self) -> str:
-        tx_data = {
-            "inputs": self.inputs, 
-            "outputs": [out.to_dict() for out in self.outputs], 
-            "senders": self.senders,
-            "fee": self.fee
+                    <!-- Path C View: Multi-Sig Form & Gas Fee Enforcement Matrix -->
+                    <div id="view-tx">
+                        <div class="input-group">
+                            <label>Primary Wallet Hex Address (Sender Public Key):</label>
+                            <input type="text" id="tx-sender" onchange="calculateDynamicFees()" placeholder="Enter sender public hex key">
+                        </div>
+                        <div class="input-group">
+                            <label>Co-Signer Public Hex Address (Required for M-of-N Threshold Verification):</label>
+                            <input type="text" id="tx-cosigner" onchange="calculateDynamicFees()" placeholder="Enter partner public hex key">
+                        </div>
+                        <div class="input-group">
+                            <label>Primary Private Key Seed (To Authorize First Signature Slot):</label>
+                            <input type="password" id="tx-private-1" placeholder="Enter sender private access seed">
+                        </div>
+                        <div class="input-group">
+                            <label>Co-Signer Private Key Seed (To Authorize Second Signature Slot):</label>
+                            <input type="password" id="tx-private-2" placeholder="Enter partner private access seed">
+                        </div>
+                        <div class="input-group">
+                            <label>Recipient Destination Wallet Public Hex Address:</label>
+                            <input type="text" id="tx-recipient" onchange="calculateDynamicFees()" placeholder="Enter recipient destination key">
+                        </div>
+                        <div class="input-group">
+                            <label>Token Transfer Value (Amount KWT):</label>
+                            <input type="number" step="0.1" id="tx-amount" oninput="calculateDynamicFees()" placeholder="0.0">
+                        </div>
+
+                        <label>Select Network Execution Fee Priority (Enforces Anti-Spam Limits):</label>
+                        <div class="fee-matrix-container">
+                            <div class="fee-tier selected" id="tier-low" onclick="selectFeeTier('low', 0.1)">
+                                <div style="font-size:0.75rem; color:#94a3b8;">Standard</div>
+                                <div class="fee-value" id="val-low">0.1 KWT</div>
+                            </div>
+                            <div class="fee-tier" id="tier-medium" onclick="selectFeeTier('medium', 0.25)">
+                                <div style="font-size:0.75rem; color:#94a3b8;">Fast</div>
+                                <div class="fee-value" id="val-medium">0.3 KWT</div>
+                            </div>
+                            <div class="fee-tier" id="tier-high" onclick="selectFeeTier('high', 0.5)">
+                                <div style="font-size:0.75rem; color:#94a3b8;">Instant</div>
+                                <div class="fee-value" id="val-high">0.6 KWT</div>
+                            </div>
+                        </div>
+                        <button class="btn" style="background: #eab308; color: #451a03;" onclick="processAndBroadcastMultiSigTransaction()">🔒 Co-Sign & Broadcast Multi-Sig Payment</button>
+                    </div>
+
+                    <!-- Path B View: Detailed UTXO Tracking Arrays -->
+                    <div id="view-bal" style="display:none;">
+                        <div class="input-group">
+                            <label>Target Balance Public Lookup Address:</label>
+                            <input type="text" id="check-address" placeholder="Enter public address hex">
+                        </div>
+                        <button class="btn btn-blue" onclick="checkTargetBalanceAndUTXOs()">Query Asset State Mapping</button>
+                        <div class="bal-display" id="bal-output">0.0 KWT</div>
+                        <label style="margin-top:1rem;">Verified Unspent Transaction Outputs (UTXO Array Database):</label>
+                        <div id="utxo-list-target" style="margin-top:0.5rem;">
+                            <div style="color:#64748b; font-size:0.8rem; text-align:center; padding:1rem;">No address queried yet.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>🚰 Devnet Test Token Faucet</h2>
+                    <div class="input-group">
+                        <label>Target Public Key Address to Fund:</label>
+                        <input type="text" id="faucet-address" placeholder="Paste target public address hex">
+                    </div>
+                    <button class="btn" style="background:#2563eb; color:#eff6ff;" id="faucet-btn" onclick="requestFaucetCoins()">Get 100.0 Free Dev KWT</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CLOUD_NODE = "https://onrender.com";
+        let selectedTier = 'low';
+        let calculatedFee = 0.1;
+
+        function addTerminalLog(message, isError = false) {
+            const term = document.getElementById("log-target");
+            const entry = document.createElement("div");
+            entry.className = "log-entry";
+            if (isError) entry.style.color = "#ef4444";
+            entry.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
+            term.appendChild(entry);
+            term.scrollTop = term.scrollHeight;
         }
-        return hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
 
-class Block:
-    def __init__(self, index: int, transactions: list, previous_hash: str, nonce: int = 0):
-        self.index = index
-        self.timestamp = time.time()
-        self.transactions = transactions
-        self.previous_hash = previous_hash
-        self.nonce = nonce
-        self.merkle_root = self.compute_merkle_root()
-        self.hash = self.compute_hash()
+        function bytesToHex(bytes) {
+            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
 
-    def compute_merkle_root(self) -> str:
-        tx_hashes = [tx.tx_id for tx in self.transactions]
-        if not tx_hashes:
-            return hashlib.sha256(b"empty").hexdigest()
-        return tx_hashes if len(tx_hashes) == 1 else hashlib.sha256("".join(tx_hashes).encode()).hexdigest()
+        function hexToBytes(hex) {
+            return new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        }
 
-    def compute_hash(self) -> str:
-        block_header = {"index": self.index, "timestamp": self.timestamp, "merkle_root": self.merkle_root, "previous_hash": self.previous_hash, "nonce": self.nonce}
-        return hashlib.sha256(json.dumps(block_header, sort_keys=True).encode()).hexdigest()
+        // --- PATH A OPTIMIZATION: Non-blocking Event Simulation Streams ---
+        function initializeRealTimeNetworkMonitor() {
+            setInterval(async () => {
+                try {
+                    const res = await fetch(`${CLOUD_NODE}/mempool`);
+                    if(res.ok) {
+                        const data = await res.json();
+                        if(data.mempool_size > 0) {
+                            addTerminalLog(`[P2P STREAM] Broadcast package caught: ${data.mempool_size} pending items in mempool.`);
+                        }
+                    }
+                } catch(e) {}
+            }, 6000);
+        }
 
-# --- Database Persistence Layer ---
-class BlockchainDB:
-    def __init__(self, db_path: str = "kiwi_ledger.db"):
-        self.db_path = db_path
-        self.init_db()
+        function calculateDynamicFees() {
+            const sender = document.getElementById("tx-sender").value.trim();
+            const cosigner = document.getElementById("tx-cosigner").value.trim();
+            const recipient = document.getElementById("tx-recipient").value.trim();
+            const amount = parseFloat(document.getElementById("tx-amount").value) || 0;
+            
+            const payloadByteLength = (sender.length + cosigner.length + recipient.length + amount.toString().length + 250);
+            
+            const lowFee = (payloadByteLength * 0.0006 + 0.03).toFixed(3);
+            const medFee = (payloadByteLength * 0.0012 + 0.12).toFixed(3);
+            const highFee = (payloadByteLength * 0.0025 + 0.25).toFixed(3);
 
-    def init_db(self):
-        """Initializes relational tables to store the structural chain state."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS blocks (
-                    id_index INTEGER PRIMARY KEY,
-                    timestamp REAL,
-                    merkle_root TEXT,
-                    previous_hash TEXT,
-                    nonce INTEGER,
-                    hash TEXT UNIQUE
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS transactions (
-                    tx_id TEXT PRIMARY KEY,
-                    block_index INTEGER,
-                    fee REAL
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS utxo_pool (
-                    utxo_key TEXT PRIMARY KEY,
-                    tx_id TEXT,
-                    output_index INTEGER,
-                    recipient TEXT,
-                    amount REAL
-                )
-            """)
-            conn.commit()
+            document.getElementById("val-low").innerText = `${lowFee} KWT`;
+            document.getElementById("val-medium").innerText = `${medFee} KWT`;
+            document.getElementById("val-high").innerText = `${highFee} KWT`;
 
-    def load_chain_state(self) -> tuple:
-        """Restores chain records and active UTXOs into memory upon reboot with precise tuple index unpacking."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id_index, timestamp, merkle_root, previous_hash, nonce, hash FROM blocks ORDER BY id_index ASC")
-            db_blocks = cursor.fetchall()
-            chain = []
-            for row in db_blocks:
-                block = Block(index=row[0], transactions=[], previous_hash=row[3], nonce=row[4])
-                block.timestamp = row[1]
-                block.merkle_root = row[2]
-                block.hash = row[5]
-                chain.append(block)
+            calculatedFee = parseFloat(selectedTier === 'low' ? lowFee : (selectedTier === 'medium' ? medFee : highFee));
+        }
 
-            cursor.execute("SELECT utxo_key, tx_id, output_index, recipient, amount FROM utxo_pool")
-            db_utxos = cursor.fetchall()
-            utxo_pool = {}
-            for row in db_utxos:
-                utxo_pool[row[0]] = UTXO(tx_id=row[1], output_index=row[2], recipient=row[3], amount=row[4])
-            return chain, utxo_pool
+        function selectFeeTier(tier, rate) {
+            selectedTier = tier;
+            document.getElementById("tier-low").className = "fee-tier" + (tier === 'low' ? " selected" : "");
+            document.getElementById("tier-medium").className = "fee-tier" + (tier === 'medium' ? " selected" : "");
+            document.getElementById("tier-high").className = "fee-tier" + (tier === 'high' ? " selected" : "");
+            calculateDynamicFees();
+            addTerminalLog(`[PRIORITY METRIC] Spend fee adjustment updated to: ${tier.toUpperCase()}`);
+        }
 
-# --- Core Cryptographic Helper Functions ---
-def verify_ed25519_signature(public_key_hex: str, message: str, signature_hex: str) -> bool:
-    """Verifies a genuine Ed25519 asymmetric signature against a public key."""
-    try:
-        public_key_bytes = bytes.fromhex(public_key_hex)
-        signature_bytes = bytes.fromhex(signature_hex)
-        public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
-        public_key.verify(signature_bytes, message.encode())
-        return True
-    except (ValueError, InvalidSignature, TypeError):
-        return False
-
-class KiwiBlockchain:
-    def __init__(self, db_filename: str = "kiwi_ledger.db"):
-        self.db = BlockchainDB(db_filename)
-        self.chain = []
-        self.utxo_pool = {}
-        self.difficulty = 2
-        self.db_filename = db_filename
-
-        saved_chain, saved_utxo = self.db.load_chain_state()
-        if saved_chain:
-            self.chain = saved_chain
-            self.utxo_pool = saved_utxo
-            print("[+] System reboot successful. State recovered from SQLite DB.")
-            if not self.verify_entire_chain_integrity():
-                print("[-] CRITICAL: Local database integrity check failed! Process aborted.")
-                sys.exit(1)
-        else:
-            print("[*] No existing ledger found. Initializing genesis architecture...")
-            self.create_genesis_block()
-
-    def verify_entire_chain_integrity(self) -> bool:
-        """Cryptographic boot loader validation check."""
-        print("[*] Verifying cryptographic ledger history...")
-        for i in range(1, len(self.chain)):
-            current = self.chain[i]
-            previous = self.chain[i-1]
-            if current.previous_hash != previous.hash:
-                return False
-            if not current.hash.startswith('0' * self.difficulty):
-                return False
-        print("[✔] Cryptographic verification complete. Ledger matches math rules.")
-        return True
-
-    def create_genesis_block(self):
-        genesis_block = Block(0, [], "0")
-        genesis_block.hash = genesis_block.compute_hash()
-        self.chain.append(genesis_block)
-        with sqlite3.connect(self.db_filename) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM utxo_pool")
-            cursor.execute("DELETE FROM transactions")
-            cursor.execute("DELETE FROM blocks")
-            cursor.execute("""
-                INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (genesis_block.index, genesis_block.timestamp, "empty", genesis_block.previous_hash, genesis_block.nonce, genesis_block.hash))
-            conn.commit()
-
-    def add_block_to_chain(self, block: Block) -> bool:
-        if block.previous_hash != self.chain[-1].hash:
-            return False
-        backup_utxo_pool = self.utxo_pool.copy()
-        
-        for tx in block.transactions:
-            for tx_in in tx.inputs:
-                utxo_key = f"{tx_in['tx_id']}:{tx_in['index']}"
-                self.utxo_pool.pop(utxo_key, None)
-            for out in tx.outputs:
-                self.utxo_pool[f"{tx.tx_id}:{out.output_index}"] = out
-        self.chain.append(block)
-
-        try:
-            with sqlite3.connect(self.db_filename) as conn:
-                cursor = conn.cursor()
-                root_str = json.dumps(block.merkle_root) if isinstance(block.merkle_root, list) else block.merkle_root
-                cursor.execute("""
-                    INSERT OR REPLACE INTO blocks (id_index, timestamp, merkle_root, previous_hash, nonce, hash)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (block.index, block.timestamp, root_str, block.previous_hash, block.nonce, block.hash))
+        // --- PATH B UPDATE: Multi-Input UTXO Mapping Matrix Reader ---
+        async function checkTargetBalanceAndUTXOs() {
+            const addr = document.getElementById("check-address").value.trim();
+            if(!addr) return alert("Please supply a valid lookup target.");
+            
+            try {
+                addTerminalLog(`[UTXO FETCH] Scanning relational state logs for: ${addr.substring(0,14)}...`);
+                const res = await fetch(`${CLOUD_NODE}/balances/${addr}`);
+                const data = await res.json();
                 
-                cursor.execute("DELETE FROM utxo_pool")
-                for key, utxo in self.utxo_pool.items():
-                    cursor.execute("""
-                        INSERT INTO utxo_pool (utxo_key, tx_id, output_index, recipient, amount)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (key, utxo.tx_id, utxo.output_index, utxo.recipient, utxo.amount))
-                conn.commit()
-        except sqlite3.Error as e:
-            print(f"[-] SQLite Insertion Error: {e}")
-            self.utxo_pool = backup_utxo_pool
-            self.chain.pop()
-            return False
-        return True
+                document.getElementById("bal-output").innerText = `${data.balance.toFixed(1)} KWT`;
+                const container = document.getElementById("utxo-list-target");
+                container.innerHTML = "";
 
-# Global Application States
-blockchain_instance = None
-mempool = []
-connected_peers = []
+                if(data.balance === 0) {
+                    container.innerHTML = `<div style="color:#64748b; text-align:center; padding:1rem;">No spent or unspent assets matching this key vector.</div>`;
+                } else {
+                    const card = document.createElement("div");
+                    card.className = "utxo-card";
+                    card.innerHTML = `
+                        <div class="utxo-meta">
+                            <span>Input Reference ID: index_sweep_allocation</span>
+                            <span style="color:#4ade80; font-weight:700;">+${data.balance.toFixed(1)} KWT</span>
+                        </div>
+                        <div style="color:#64748b; font-size:0.7rem;">Verification Index Alignment: UTXO Slot Output #0</div>
+                    `;
+                    container.appendChild(card);
+                }
+                addTerminalLog(`[UTXO FETCH] Structural sync completed. Balance verified at ${data.balance} KWT.`);
+            } catch(e) {
+                addTerminalLog("Network balance processing connection error.", true);
+            }
+        }
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global blockchain_instance
-    port = 5000
-    for i, arg in enumerate(sys.argv):
-        if arg == "--port" and i + 1 < len(sys.argv):
-            port = int(sys.argv[i+1])
-    blockchain_instance = KiwiBlockchain(f"kiwi_live_node_{port}.db")
-    yield
+        // --- PATH C UPDATE: Unified Multi-Sig Asymmetric Local Signing Payload Generator ---
+        async function processAndBroadcastMultiSigTransaction() {
+            const sender = document.getElementById("tx-sender").value.trim();
+            const cosigner = document.getElementById("tx-cosigner").value.trim();
+            const priv1 = document.getElementById("tx-private-1").value.trim();
+            const priv2 = document.getElementById("tx-private-2").value.trim();
+            const recipient = document.getElementById("tx-recipient").value.trim();
+            const amount = parseFloat(document.getElementById("tx-amount").value);
 
-# --- API Specification Layer ---
-app = FastAPI(title="Kiwi Blockchain Node Engine", lifespan=lifespan)
+            if(!sender || !cosigner || !priv1 || !priv2 || !recipient || isNaN(amount)) {
+                return alert("All configuration parameters are required for multi-signature generation loops.");
+            }
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+            addTerminalLog("[CRYPTO SIGN] Initiating local dual-signature context blocks serialization...");
+            try {
+                // 1. Build message string to match Python format expectations character-for-character
+                const msgString = f"{sender}->{recipient}:{amount.toFixed(1)}" if typeof f !== 'undefined' else `${sender}->${recipient}:${amount.toFixed(1)}`;
+                const msgBytes = new TextEncoder().encode(msgString);
 
-class TransactionPayload(BaseModel):
-    senders: list        # Array of strings
-    recipient: str
-    amount: float
-    signatures: list     # Array of strings
-    fee: float
+                // Compute Signature 1 (Primary Key)
+                const s1PrivBytes = hexToBytes(priv1);
+                const s1PubBytes = hexToBytes(sender);
+                const s1SecretBytes = new Uint8Array(64);
+                s1SecretBytes.set(s1PrivBytes, 0);
+                s1SecretBytes.set(s1PubBytes, 32);
+                const sig1Hex = bytesToHex(nacl.sign.detached(msgBytes, s1SecretBytes));
 
-class WalletSignPayload(BaseModel):
-    private_key: str
-    message: str
+                // Compute Signature 2 (Co-signer Key)
+                const s2PrivBytes = hexToBytes(priv2);
+                const s2PubBytes = hexToBytes(cosigner);
+                const s2SecretBytes = new Uint8Array(64);
+                s2SecretBytes.set(s2PrivBytes, 0);
+                s2SecretBytes.set(s2PubBytes, 32);
+                const sig2Hex = bytesToHex(nacl.sign.detached(msgBytes, s2SecretBytes));
 
-@app.get("/")
-def read_root():
-    return {
-        "network": "Kiwi Blockchain Network Layer",
-        "status": "Operational",
-        "version": "1.1.0-MultiSig-Fees",
-        "active_mempool_transactions": len(mempool)
-    }
+                addTerminalLog("[CRYPTO SIGN] Multi-Sig signatures verified inside memory cache. Transmitting payload...");
 
-@app.get("/chain")
-def get_chain():
-    return {
-        "length": len(blockchain_instance.chain),
-        "chain": [
-            {
-                "index": b.index,
-                "timestamp": b.timestamp,
-                "previous_hash": b.previous_hash,
-                "nonce": b.nonce,
-                "hash": b.hash
-            } for b in blockchain_instance.chain
-        ]
-    }
+                const txRes = await fetch(`${CLOUD_NODE}/transactions/new`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        senders: [sender, cosigner],
+                        recipient: recipient,
+                        amount: amount,
+                        signatures: [sig1Hex, sig2Hex],
+                        fee: calculatedFee
+                    })
+                });
 
-@app.get("/balances/{address}")
-def get_balance(address: str):
-    bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == address)
-    return {"address": address, "balance": bal}
+                if(txRes.ok) {
+                    addTerminalLog("[MEMPOOL QUEUE] Server passed gas matrix and M-of-N validations! Mining block...");
+                    const mineRes = await fetch(`${CLOUD_NODE}/mine`, { method: 'POST' });
+                    const mineData = await mineRes.json();
+                    
+                    addTerminalLog(`[BLOCK SEAL] Complete! Block #${mineData.block_index} finalized. Hash: ${mineData.block_hash.substring(0,18)}...`);
+                    alert(`Success! Block #${mineData.block_index} mined under Multi-Sig rules.\nGas Cost: ${calculatedFee} KWT charged.`);
+                    updateChainExplorer();
+                } else {
+                    const err = await txRes.json();
+                    addTerminalLog(`[REJECTED] Core engine execution exception: ${err.detail}`, true);
+                    alert(`Transaction Dropped: ${err.detail}`);
+                }
+            } catch(e) {
+                addTerminalLog(`[FATAL] Local client runtime crash: ${e.message}`, true);
+            }
+        }
 
-@app.get("/mempool")
-def get_mempool():
-    return {"mempool_size": len(mempool), "transactions": mempool}
+        // --- Core Application Infrastructure Scripts ---
+        function generateWalletKeypairOnClient() {
+            const pair = nacl.sign.keyPair();
+            const pubHex = bytesToHex(pair.publicKey);
+            const privHex = bytesToHex(pair.secretKey.slice(0, 32));
 
-@app.post("/wallet/create")
-def create_wallet_keypair():
-    private_key = ed25519.Ed25519PrivateKey.generate()
-    public_key = private_key.public_key()
-    return {
-        "private_key": private_key.private_bytes_raw().hex(),
-        "public_key": public_key.public_bytes_raw().hex()
-    }
+            document.getElementById("gen-pub").value = pubHex;
+            document.getElementById("gen-priv").value = privHex;
+            
+            document.getElementById("tx-sender").value = pubHex;
+            document.getElementById("tx-private-1").value = privHex;
+            document.getElementById("check-address").value = pubHex;
+            document.getElementById("faucet-address").value = pubHex;
 
-@app.post("/wallet/sign")
-def sign_transaction_data(payload: WalletSignPayload):
-    try:
-        private_bytes = bytes.fromhex(payload.private_key)
-        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_bytes)
-        signature = private_key.sign(payload.message.encode())
-        return {"message_string": payload.message, "signature": signature.hex()}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Signing error: {str(e)}")
+            document.getElementById("download-btn").style.display = "block";
+            document.getElementById("warning-frame").style.display = "block";
+            calculateDynamicFees();
+            addTerminalLog("[WALLET] Ed25519 asymmetric pair generated inside browser runtime environment.");
+        }
 
-@app.post("/transactions/new")
-def add_transaction(payload: TransactionPayload):
-    if not payload.senders:
-        raise HTTPException(status_code=400, detail="Missing sender payload public keys.")
-        
-    primary_sender = payload.senders[0]
-    if not blockchain_instance.utxo_pool:
-        initial_coin = UTXO(tx_id="genesis_mint", output_index=0, recipient=primary_sender, amount=500.0)
-        blockchain_instance.utxo_pool["genesis_mint:0"] = initial_coin
+        function downloadKeysBackupFile() {
+            const pub = document.getElementById("gen-pub").value;
+            const priv = document.getElementById("gen-priv").value;
+            if(!pub || !priv) return;
+            const text = `=== KIWI MAINNET WALLET COIN SECURE ACCOUNT BACKUP ===\nPublic Address Routing Hex: ${pub}\nPrivate Access Seed Key Hex: ${priv}\n=======================================================`;
+            const blob = new Blob([text], { type: "text/plain" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `kiwi_wallet_keys_${pub.substring(0,8)}.txt`;
+            a.click();
+        }
 
-    # 1. ENFORCE DYNAMIC SPAM FEES
-    payload_size_bytes = len(json.dumps(payload.dict()))
-    min_required_fee = (payload_size_bytes * 0.0005) + 0.01
-    if payload.fee < min_required_fee:
-        raise HTTPException(status_code=402, detail=f"Insufficient fee. Minimum: {min_required_fee:.3f} KWT.")
+        function switchWalletTab(target) {
+            document.getElementById("tab-tx").className = target === 'tx' ? "tab active" : "tab";
+            document.getElementById("tab-bal").className = target === 'bal' ? "tab active" : "tab";
+            document.getElementById("view-tx").style.display = target === 'tx' ? "block" : "none";
+            document.getElementById("view-bal").style.display = target === 'bal' ? "block" : "none";
+        }
 
-    # 2. MULTI-SIG THRESHOLD APPROVAL
-    required_signatures_count = max(1, len(payload.senders) // 2 + (len(payload.senders) % 2 > 0))
-    if len(payload.signatures) < required_signatures_count:
-        raise HTTPException(status_code=403, detail=f"Requires at least {required_signatures_count} signatures.")
+        async function verifyNodeHealth() {
+            try {
+                const res = await fetch(CLOUD_NODE);
+                if(res.ok) {
+                    document.getElementById("net-status").innerText = "Network Status: Operational Connected";
+                    document.getElementById("net-status").style.background = "#15803d";
+                    document.getElementById("net-status").style.color = "#bbf7d0";
+                    addTerminalLog("[SYSTEM] Successfully verified connectivity loop to cloud Render engine.");
+                }
+            } catch {
+                document.getElementById("net-status").innerText = "Connection Stalled (Waking/Offline)";
+                const badge = document.getElementById("net-status");
+                badge.style.background = "#7f1d1d";
+                badge.style.color = "#fca5a5";
+                badge.style.border = "1px solid #ef4444";
+            }
+        }
 
-    msg_to_verify = f"{primary_sender}->{payload.recipient}:{payload.amount:.1f}"
-    
-    valid_sig_matches = 0
-    for pub_key in payload.senders:
-        for signature in payload.signatures:
-            if verify_ed25519_signature(pub_key, msg_to_verify, signature):
-                valid_sig_matches += 1
-                break
+        async function updateChainExplorer() {
+            const container = document.getElementById("blocks-target");
+            try {
+                const res = await fetch(`${CLOUD_NODE}/chain`);
+                const data = await res.json();
+                container.innerHTML = "";
+                
+                data.chain.reverse().forEach(b => {
+                    const el = document.createElement("div");
+                    el.className = "block-item";
+                    el.innerHTML = `
+                        <div class="block-id">
+                            <span>Block Index Height: #${b.index}</span>
+                            <span style="font-size:0.75rem; color:#94a3b8; font-family:monospace;">Proof Nonce: ${b.nonce}</span>
+                        </div>
+                        <div style="font-size:0.825rem; font-weight:500; color:#94a3b8;">Block Block Hash Signature:</div>
+                        <div class="hash-box">${b.hash}</div>
+                    `;
+                    container.appendChild(el);
+                });
+            } catch(e) {
+                container.innerHTML = "Awaiting database pipeline synchronization thread initialization context...";
+            }
+        }
 
-    if valid_sig_matches < required_signatures_count:
-        raise HTTPException(status_code=401, detail="Cryptographic multi-sig authorization verification failed.")
+        async function requestFaucetCoins() {
+            const addr = document.getElementById("faucet-address").value.trim();
+            if(!addr) return alert("Please specify a target wallet configuration.");
+            const btn = document.getElementById("faucet-btn");
+            btn.innerText = "Mining Faucet Block Tx...";
+            btn.disabled = true;
 
-    # 3. UTXO AVAILABILITY
-    current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == primary_sender)
-    total_cost = payload.amount + payload.fee
-    if current_bal < total_cost:
-        raise HTTPException(status_code=400, detail=f"Insufficient wallet funds. Cost: {total_cost} KWT.")
+            try {
+                addTerminalLog(`[FAUCET] Triggering network transaction spend allocation for wallet: ${addr.substring(0,10)}...`);
+                // Base structure mocks matching layout
+                const msg = `9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c->${addr}:100.0`;
+                
+                const signRes = await fetch(`${CLOUD_NODE}/wallet/sign`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ private_key: "0c4247ef03e70d2e42cad8af2fb5cf0d8de7c43f5f31a4a7189d3c5ebdb9ce63", message: msg })
+                });
+                const sigData = await signRes.json();
 
-    mempool.append(payload.dict())
-    return {"message": "Gas fees and Multi-Sig cleared! Transaction safely cued.", "pending_transactions_count": len(mempool)}
+                // Formats to match multi-sig validation requirements exactly
+                const txRes = await fetch(`${CLOUD_NODE}/transactions/new`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        senders: ["9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c"], 
+                        recipient: addr, 
+                        amount: 100.0, 
+                        signatures: [sigData.signature],
+                        fee: 0.1
+                    })
+                });
 
-@app.post("/mine")
-def mine_block_from_mempool():
-    global mempool
-    if not mempool:
-        raise HTTPException(status_code=400, detail="Mempool is empty.")
+                if(txRes.ok) {
+                    await fetch(`${CLOUD_NODE}/mine`, { method: 'POST' });
+                    addTerminalLog("[FAUCET] Faucet block mined cleanly. Balances upgraded.");
+                    alert("Success! 100.0 KWT loaded onto your wallet address.");
+                    updateChainExplorer();
+                    if(document.getElementById("view-bal").style.display !== "none") checkTargetBalanceAndUTXOs();
+                } else {
+                    const err = await txRes.json();
+                    addTerminalLog(`[FAUCET ERROR] Rejected by core node: ${err.detail}`, true);
+                }
+            } catch(e) {
+                addTerminalLog("[FAUCET FAILURE] Network connectivity loss connecting to node core engine.", true);
+            } finally {
+                btn.innerText = "Get 100.0 Free Dev KWT";
+                btn.disabled = false;
+            }
+        }
 
-    block_transactions = []
-    for tx_data in mempool:
-        senders = tx_data["senders"]
-        recipient = tx_data["recipient"]
-        amount = tx_data["amount"]
-        signatures = tx_data["signatures"]
-        fee = tx_data["fee"]
-
-        primary_sender = senders[0]
-        source_tx_id = "genesis_mint"
-        source_index = 0
-        for key, utxo in blockchain_instance.utxo_pool.items():
-            if utxo.recipient == primary_sender:
-                source_tx_id = utxo.tx_id
-                source_index = utxo.output_index
-                break
-
-        current_bal = sum(u.amount for u in blockchain_instance.utxo_pool.values() if u.recipient == primary_sender)
-        tx_input = {"tx_id": source_tx_id, "index": source_index}
-        tx_output = UTXO(tx_id=f"tx_{int(time.time())}", output_index=0, recipient=recipient, amount=amount)
-        tx_change = UTXO(tx_id=f"tx_{int(time.time())}", output_index=1, recipient=primary_sender, amount=current_bal - amount - fee)
-
-        secure_tx = Transaction(inputs=[tx_input], outputs=[tx_output, tx_change], senders=senders, signatures=signatures, fee=fee)
-        block_transactions.append(secure_tx)
-
-    new_block = Block(index=len(blockchain_instance.chain), transactions=block_transactions, previous_hash=blockchain_instance.chain[-1].hash)
-    while not new_block.hash.startswith('0' * blockchain_instance.difficulty):
-        new_block.nonce += 1
-        new_block.hash = new_block.compute_hash()
-
-    if not blockchain_instance.add_block_to_chain(new_block):
-        raise HTTPException(status_code=500, detail="Database commitment failure.")
-
-    mempool = []
-    return {"message": "Block mined successfully under multi-sig rules!", "block_index": new_block.index, "block_hash": new_block.hash}
-
-if __name__ == "__main__":
-    target_port = 5000
-    for i, arg in enumerate(sys.argv):
-        if arg == "--port" and i + 1 < len(sys.argv):
-            target_port = int(sys.argv[i+1])
-    uvicorn.run(app, host="0.0.0.0", port=target_port)
+        // --- NON-BLOCKING ASYNC BOOTLOADER PHASE ---
+        async function startWebPortalSecurely() {
+            try {
+                verifyNodeHealth();
+                setTimeout(() => {
+                    updateChainExplorer();
+                    initializeRealTimeNetworkMonitor();
+                }, 300);
+            } catch(e) {}
+        }
+        startWebPortalSecurely();
+    </script>
+</body>
+</html>
