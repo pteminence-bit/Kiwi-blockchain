@@ -6,6 +6,7 @@ import time
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from pydantic import BaseModel
 import httpx
@@ -232,6 +233,15 @@ async def lifespan(app: FastAPI):
 # --- API Specification Layer ---
 app = FastAPI(title="Kiwi Blockchain Node Engine", lifespan=lifespan)
 
+# Inject CORS configuration for mobile app connectivity
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 class TransactionPayload(BaseModel):
     sender: str
     recipient: str
@@ -241,6 +251,16 @@ class TransactionPayload(BaseModel):
 class WalletSignPayload(BaseModel):
     private_key: str
     message: str
+
+@app.get("/")
+def read_root():
+    """Root route showing node state instead of 404."""
+    return {
+        "network": "Kiwi Blockchain Network Layer",
+        "status": "Operational",
+        "version": "1.0.0-Live",
+        "active_mempool_transactions": len(mempool)
+    }
 
 @app.get("/chain")
 def get_chain():
