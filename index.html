@@ -48,11 +48,11 @@
     <div class="container">
         <div class="nav">
             <h1>🥝 Kiwi Layer-1 Mainnet Terminal</h1>
-            <span class="status-badge" id="net-status">Waking Node Container...</span>
+            <span class="status-badge" id="net-status">Syncing Node...</span>
         </div>
 
         <div class="grid">
-            <!-- Left Side Panel Layout -->
+            <!-- Left Panel -->
             <div>
                 <div class="card">
                     <h2>📡 Live P2P Streaming Node Logs (Path A)</h2>
@@ -70,7 +70,7 @@
                 </div>
             </div>
 
-            <!-- Right Side Panel Layout -->
+            <!-- Right Panel -->
             <div>
                 <div class="card" style="border: 1px solid #22c55e;">
                     <h2>🔑 Asymmetric Wallet Key Generation Suite</h2>
@@ -166,6 +166,7 @@
 
         function addTerminalLog(message, isError = false) {
             const term = document.getElementById("log-target");
+            if (!term) return;
             const entry = document.createElement("div");
             entry.className = "log-entry";
             if (isError) entry.style.color = "#ef4444";
@@ -174,24 +175,23 @@
             term.scrollTop = term.scrollHeight;
         }
 
-        function bytesToHex(bytes) {
-            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        function bytesToHex(bytesArray) {
+            return Array.from(bytesArray).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        // --- FIXED LOOP EXPRESSION: Correct structural unpacking map ---
-        function hexToBytes(hex) {
-            let bytes = [];
-            for (let c = 0; c < hex.length; c += 2) {
-                bytes.push(parseInt(hex.substr(c, 2), 16));
+        function hexToBytes(hexString) {
+            let byteArray = [];
+            for (let c = 0; c < hexString.length; c += 2) {
+                byteArray.push(parseInt(hexString.substr(c, 2), 16));
             }
-            return new Uint8Array(bytes);
+            return new Uint8Array(byteArray);
         }
 
         function initializeRealTimeNetworkMonitor() {
-            verifyNodeHealth();
             setInterval(async () => {
                 try {
                     const res = await fetch(`${CLOUD_NODE}/mempool`);
+                    if (!res.ok) return;
                     const data = await res.json();
                     if(data.mempool_size > 0) {
                         addTerminalLog(`[P2P BROADCAST] Memory pool transaction detected (${data.mempool_size} pending).`);
@@ -199,7 +199,7 @@
                         if(Math.random() > 0.85) addTerminalLog("[P2P HEARTBEAT] Sync connection parameters verified.");
                     }
                 } catch(e) {}
-            }, 5000);
+            }, 6000);
         }
 
         function calculateDynamicFees() {
@@ -230,10 +230,10 @@
 
         async function checkTargetBalanceAndUTXOs() {
             const addr = document.getElementById("check-address").value.trim();
-            if(!addr) return alert("Input a address public key hex code.");
+            if(!addr) return alert("Input a valid public address key.");
             
             try {
-                addTerminalLog(`[UTXO ENGINES] Sweeping active distributed inputs for address: ${addr.substring(0,12)}...`);
+                addTerminalLog(`[UTXO ENGINE] Sweeping distributed inputs for address: ${addr.substring(0,12)}...`);
                 const res = await fetch(`${CLOUD_NODE}/balances/${addr}`);
                 const data = await res.json();
                 
@@ -268,7 +268,7 @@
             const amountVal = parseFloat(document.getElementById("tx-amount").value);
 
             if(!senderPub || !senderPriv || !recipientPub || isNaN(amountVal)) {
-                return alert("All fields are mandatory to compute signatures.");
+                return alert("All input transaction parameters are mandatory.");
             }
 
             try {
@@ -300,7 +300,7 @@
                 });
 
                 if(txRes.ok) {
-                    addTerminalLog("[MEMPOOL] Multi-Sig authorization parameters valid. Requesting block seal...");
+                    addTerminalLog("[MEMPOOL] Multi-Sig parameters valid. Requesting block seal...");
                     const mineRes = await fetch(`${CLOUD_NODE}/mine`, { method: 'POST' });
                     const mineData = await mineRes.json();
                     
@@ -317,6 +317,9 @@
         }
 
         function generateWalletKeypairOnClient() {
+            if (typeof nacl === 'undefined') {
+                return alert("Cryptographic library still compiling. Wait 2 seconds and retry.");
+            }
             const pair = nacl.sign.keyPair();
             const pubHex = bytesToHex(pair.publicKey);
             const privHex = bytesToHex(pair.secretKey.slice(0, 32));
@@ -359,17 +362,25 @@
                 const res = await fetch(CLOUD_NODE);
                 if(res.ok) {
                     document.getElementById("net-status").innerText = "Network Status: Operational";
+                    document.getElementById("net-status").style.background = "#15803d";
+                    document.getElementById("net-status").style.color = "#bbf7d0";
                     addTerminalLog("[SYSTEM] Connected to primary Render cloud node instance.");
+                    updateChainExplorer();
+                    initializeRealTimeNetworkMonitor();
+                } else {
+                    document.getElementById("net-status").innerText = "Waking up Container Node...";
                 }
-            } catch {
-                document.getElementById("net-status").innerText = "Offline Interrupted";
+            } catch (e) {
+                document.getElementById("net-status").innerText = "Connecting to Node...";
             }
         }
 
         async function updateChainExplorer() {
             const container = document.getElementById("blocks-target");
+            if (!container) return;
             try {
                 const res = await fetch(`${CLOUD_NODE}/chain`);
+                if (!res.ok) return;
                 const data = await res.json();
                 container.innerHTML = "";
                 data.chain.reverse().forEach(b => {
@@ -379,7 +390,7 @@
                     container.appendChild(el);
                 });
             } catch(e) {
-                container.innerHTML = "Error parsing ledger frames.";
+                container.innerHTML = "<div style='color:#64748b; font-size:0.8rem; text-align:center;'>Awaiting block registry frame arrays...</div>";
             }
         }
 
@@ -391,6 +402,7 @@
             btn.disabled = true;
 
             try {
+                addTerminalLog(`[FAUCET] Triggering transaction spend allocation for wallet: ${addr.substring(0,10)}...`);
                 const msg = `9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c->${addr}:100.0`;
                 const signRes = await fetch(`${CLOUD_NODE}/wallet/sign`, {
                     method: 'POST',
@@ -399,10 +411,18 @@
                 });
                 const sigData = await signRes.json();
 
+                const txPayload = {
+                    senders: ["9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c"],
+                    recipient: addr,
+                    amount: 100.0,
+                    signatures: [sigData.signature],
+                    fee: 0.15
+                };
+
                 const txRes = await fetch(`${CLOUD_NODE}/transactions/new`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ senders: ["9b355dbacdd8605235d51180424c123c2a0d581b2f598f319269479490fe4d5c"], recipient: addr, amount: 100.0, signatures: [sigData.signature], fee: 0.15 })
+                    body: JSON.stringify(txPayload)
                 });
 
                 if(txRes.ok) {
@@ -423,12 +443,24 @@
             }
         }
 
+        // Safe Asynchronous Startup Trigger
         async function startWebPortalSecurely() {
-            verifyNodeHealth();
-            setTimeout(() => {
-                updateChainExplorer();
-                initializeRealTimeNetworkMonitor();
-            }, 500);
+            // Keep checking until the cloud container finishes waking up
+            let attempts = 0;
+            const checkerInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const res = await fetch(CLOUD_NODE);
+                    if (res.ok) {
+                        clearInterval(checkerInterval);
+                        verifyNodeHealth();
+                    }
+                } catch(e) {
+                    if (attempts % 5 === 0) {
+                        addTerminalLog("[SYSTEM] Render container is performing a cold start. Waiting...");
+                    }
+                }
+            }, 3000);
         }
         startWebPortalSecurely();
     </script>
