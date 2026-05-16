@@ -314,7 +314,6 @@ def add_transaction(payload: TransactionPayload):
     if not payload.senders:
         raise HTTPException(status_code=400, detail="Transaction requires at least one sender address.")
         
-    # --- SANITIZATION FIX: Safely cast sender reference as a pure string sequence ---
     primary_sender = str(payload.senders[0])
 
     if not blockchain_instance.utxo_pool:
@@ -392,6 +391,7 @@ def mine_block_from_mempool():
     mempool = []
     return {"message": "Block mined successfully!", "block_index": new_block.index, "block_hash": new_block.hash}
 
+# --- Standardized Entry Frame Hook ---
 if __name__ == "__main__":
     target_port = 5000
     for i, arg in enumerate(sys.argv):
